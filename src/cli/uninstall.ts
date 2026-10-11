@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { registry } from '../agents/index.js';
@@ -125,12 +125,21 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
     managedRoots(ctx, adapters),
   );
 
+  // 空目录只能报告、不能删：`~/.trae/rules` 这类是工具原生的规则目录，
+  // 我们从没建过它，删了就是动用户的目录。分不清"谁建的"时，宁可多说一句。
+  const emptyRoots = managedRoots(ctx, adapters).filter(
+    (root) => existsSync(root) && readdirSync(root).length === 0,
+  );
+
   ctx.out('');
   ctx.out(
     `清理完成：删除 ${removed.length} 个由 ejdrone 投递的文件及其记账` +
       (stripped.length > 0 ? `；撤掉 ${stripped.length} 处团队区块（文件与你写在标记外的内容保留）` : ''),
   );
   for (const item of kept) ctx.out(`  保留 ${item.entry.path}（${item.entry.resource}：${item.reason}）`);
+  for (const root of emptyRoots) {
+    ctx.out(`  留下空目录 ${root}（可能是我们建的，也可能本来就是工具的空目录；确认无用可自行删除）`);
+  }
   ctx.out(`config 保留在 ${configPath(ctx.env)}；要彻底移除本工具状态请手动删除该目录，npm 包由 npm uninstall 负责`);
   return 0;
 }

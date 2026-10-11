@@ -242,8 +242,40 @@ describe('uninstall', () => {
     // 记账只剩"保留下来"的那条：我改过的 style.md（区块已随撤销清掉）
     expect(ledger.entries.map((e) => e.resource)).toEqual(['rules:style']);
 
-    const settings = JSON.parse(member.read('.claude', 'settings.json')) as { hooks?: unknown };
-    expect(settings.hooks).toBeUndefined();
+    // hook 文件是整个由我们造出来的：摘掉自己那条之后只剩空对象，
+    // 留着只会让成员多一个"这是谁写的"的孤儿文件 —— 删掉。
+    expect(member.exists('.claude', 'settings.json')).toBe(false);
+  });
+
+  it('hook 文件里有成员自己的配置时：只摘我们那条，文件与他的键原样留着', async () => {
+    const member = h.member('uninstall-keeps-user-hook-file');
+    installTools(member, ['claude']);
+    member.write('.claude/settings.json', JSON.stringify({ model: 'opus', hooks: { Stop: [] } }, null, 4));
+    const init = await member.run(['init', h.origin, '--agent', 'claude', '--role', 'be']);
+    expect(init.code, init.all).toBe(0);
+    // 装进去时按原文件的 4 空格缩进写，不能把整份重排成 2 空格
+    expect(member.read('.claude', 'settings.json')).toContain('\n    "model": "opus"');
+
+    const done = await member.run(['uninstall', '--force']);
+    expect(done.code, done.all).toBe(0);
+    expect(member.exists('.claude', 'settings.json')).toBe(true);
+    const text = member.read('.claude', 'settings.json');
+    expect(text).toContain('"model": "opus"');
+    expect(text).not.toContain('EJDRONE_HOOK');
+  });
+
+  it('清空后留下的空目录只报告、不删除（分不清是谁建的）', async () => {
+    const member = h.member('uninstall-empty-roots');
+    await initMember(member, ['claude']);
+    expect(member.exists('.claude', 'rules', 'style.md')).toBe(true);
+
+    const done = await member.run(['uninstall', '--force']);
+    expect(done.code, done.all).toBe(0);
+    expect(done.all).toContain('留下空目录');
+    // 目录仍在：`~/.trae/rules` 这类是工具原生目录，删了就是动用户的目录
+    expect(member.exists('.claude', 'skills')).toBe(true);
+    expect(member.exists('.claude', 'rules')).toBe(true);
+    expect(member.exists('.claude', 'rules', 'style.md')).toBe(false);
   });
 
   it('撤掉未改动的团队区块，标记外的用户内容保持原样', async () => {

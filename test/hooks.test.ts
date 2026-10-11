@@ -81,11 +81,26 @@ describe('removeHook / hasHook / installedHookCommand', () => {
     expect(installedHookCommand(settings, 'SessionStart')).toBeNull();
   });
 
-  it('事件全空时把 hooks 键整个删掉，不留空壳', () => {
+  it('事件全空且整个文件是我们造的 → 连文件一起删，不留孤儿', () => {
     upsertHook(settings, SPEC);
     removeHook(settings);
+    expect(existsSync(settings)).toBe(false);
+  });
+
+  it('摘掉我们的条目后还剩别人的内容 → 只删我们那条，文件与别人的键都在', () => {
+    const original = JSON.stringify(
+      { theme: 'dark', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'someone-else.sh' }] }] } },
+      null,
+      2,
+    );
+    writeFileSync(settings, `${original}\n`, 'utf8');
+    upsertHook(settings, SPEC);
+    removeHook(settings, 'SessionStart');
     const parsed = JSON.parse(readFileSync(settings, 'utf8')) as Record<string, unknown>;
-    expect('hooks' in parsed).toBe(false);
+    expect(parsed.theme).toBe('dark');
+    const bag = parsed.hooks as Record<string, unknown>;
+    expect(bag.Stop).toBeDefined();
+    expect('SessionStart' in bag).toBe(false);
   });
 
   it('文件不存在时全部静默', () => {
@@ -93,5 +108,51 @@ describe('removeHook / hasHook / installedHookCommand', () => {
     expect(hasHook(settings, 'SessionStart')).toBe(false);
     expect(installedHookCommand(settings, 'SessionStart')).toBeNull();
     expect(() => removeHook(settings, 'SessionStart')).not.toThrow();
+  });
+});
+
+/**
+ * 真机试验（2026-10-11 M5）暴露：卸载后 ~/.claude/settings.json 与备份差一个字节 ——
+ * 原文件是 4 空格缩进、结尾无换行，而实现硬写 2 空格 + '\n'。
+ * 承诺是"只动我们那一条"，那装完再卸就该逐字节回到原样。
+ */
+describe('格式回环', () => {
+  it('4 空格缩进 + 无结尾换行：装完再卸，文件逐字节回到原样', () => {
+    const original =
+      '{\n    "hooks": {\n        "Stop": [\n            {\n                "hooks": [\n                    {\n                        "type": "command",\n                        "command": "someone-else.sh"\n                    }\n                ]\n            }\n        ]\n    },\n    "model": "opus"\n}';
+    writeFileSync(settings, original, 'utf8');
+
+    upsertHook(settings, SPEC);
+    const installed = readFileSync(settings, 'utf8');
+    expect(installed).not.toBe(original);
+    expect(installed.endsWith('\n')).toBe(false);
+    expect(installed).toContain('\n    "hooks": {');
+    expect(installed).not.toContain('\n  "hooks"');
+    expect(installed).toContain('"model": "opus"');
+
+    removeHook(settings, 'SessionStart');
+    expect(readFileSync(settings, 'utf8')).toBe(original);
+  });
+
+  it('2 空格缩进 + 有结尾换行：同样逐字节回环', () => {
+    const original = '{\n  "hooks": {\n    "Stop": []\n  }\n}\n';
+    writeFileSync(settings, original, 'utf8');
+    upsertHook(settings, SPEC);
+    removeHook(settings, 'SessionStart');
+    expect(readFileSync(settings, 'utf8')).toBe(original);
+  });
+
+  it('摘完后文档只剩空对象 → 那是我们造出来的孤儿，删掉；有任何用户内容则绝不删', () => {
+    writeFileSync(settings, '{}', 'utf8'); // 成员自己建的空 settings
+    upsertHook(settings, SPEC);
+    removeHook(settings, 'SessionStart');
+    // 空对象不承载任何用户信息，留着只会让人问"这是谁写的"；工具下次自己会重建。
+    expect(existsSync(settings)).toBe(false);
+
+    writeFileSync(settings, '{"model":"opus"}', 'utf8');
+    upsertHook(settings, SPEC);
+    removeHook(settings, 'SessionStart');
+    expect(existsSync(settings)).toBe(true);
+    expect(JSON.parse(readFileSync(settings, 'utf8'))).toEqual({ model: 'opus' });
   });
 });

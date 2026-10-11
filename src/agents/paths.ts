@@ -51,7 +51,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rulesExt: 'md',
     hookFile: 'settings.json',
     hookEvent: 'SessionStart',
-    probe: '已真机核对(2026-10-11)：~/.claude/skills 与 settings.json 均存在，skills 与 hook 落点确认；rules 目录名沿用投递矩阵（真机无原生 rules 目录，由本工具创建）',
+    probe: '已真机核对(2026-10-11 M5 试验)：~/.claude/skills 投递正常、settings.json 里用户已有的 SessionEnd/Stop 条目不被动、我们那条 SessionStart 幂等；卸载后 settings.json 逐字节回到原样（缩进与结尾换行跟随原文件）。rules 目录名沿用投递矩阵（真机无原生 rules 目录，由本工具创建）',
   },
   'qoder-cn': {
     id: 'qoder-cn',
@@ -63,7 +63,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rulesExt: 'md',
     hookFile: 'settings.json',
     hookEvent: 'SessionStart',
-    probe: '已真机核对(2026-10-11)：~/.qoder-cn/skills 与 settings.json 均存在，故 skills 与 hook 落点确认；rules 目录名沿用投递矩阵（真机无原生 rules 目录，由本工具创建）',
+    probe: '已真机核对(2026-10-11 M5 试验)：投递到 ~/.qoder-cn/skills 的技能真的被 Qoder CN 读到了 —— 新会话的可用技能列表里出现了仓库刚投递的 trial-note/trial-ns，属内容级证据（1.0 只核到目录存在）。settings.json 的 hook 条目写入/卸载均正常（是否被 Qoder 触发仍未证）。未核对：rules 目录是否被读取',
   },
   cursor: {
     id: 'cursor',

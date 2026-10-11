@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 /**
@@ -37,14 +37,29 @@ export class HookSettingsError extends Error {
 type HookEntry = { matcher?: string; hooks?: unknown[] };
 
 function readSettings(settingsPath: string): Record<string, unknown> {
-  if (!existsSync(settingsPath)) return {};
+  return load(settingsPath).doc;
+}
+
+interface Loaded {
+  doc: Record<string, unknown>;
+  /** 原文格式：缩进与结尾换行都跟着原文件走，卸载后才能逐字节还原 */
+  format: { indent: number; trailingNewline: boolean };
+  existed: boolean;
+}
+
+function load(settingsPath: string): Loaded {
+  const format = { indent: 2, trailingNewline: true };
+  if (!existsSync(settingsPath)) return { doc: {}, format, existed: false };
   let raw: string;
   try {
     raw = readFileSync(settingsPath, 'utf8');
   } catch (e) {
     throw new HookSettingsError(`Cannot read settings: ${(e as Error).message}`, settingsPath);
   }
-  if (raw.trim() === '') return {};
+  format.trailingNewline = raw.endsWith('\n');
+  const firstIndent = /^ {2,}/m.exec(raw)?.[0].length;
+  if (firstIndent !== undefined) format.indent = firstIndent;
+  if (raw.trim() === '') return { doc: {}, format, existed: true };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -54,7 +69,7 @@ function readSettings(settingsPath: string): Record<string, unknown> {
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new HookSettingsError('Settings must be a JSON object', settingsPath);
   }
-  return parsed as Record<string, unknown>;
+  return { doc: parsed as Record<string, unknown>, format, existed: true };
 }
 
 /** 我们注入的条目：hooks[] 里任一 command 含 marker */
@@ -78,6 +93,12 @@ function atomicWrite(filePath: string, text: string): void {
   renameSync(tmp, filePath);
 }
 
+/** 按原文件的缩进与结尾换行渲染 —— 卸载后才能逐字节回到成员原来的样子。 */
+function render(doc: unknown, format: { indent: number; trailingNewline: boolean }): string {
+  const text = JSON.stringify(doc, null, format.indent);
+  return format.trailingNewline ? `${text}\n` : text;
+}
+
 function hookList(settings: Record<string, unknown>, event: string): unknown[] {
   const hooks = settings.hooks;
   if (hooks === null || typeof hooks !== 'object' || Array.isArray(hooks)) return [];
@@ -86,7 +107,7 @@ function hookList(settings: Record<string, unknown>, event: string): unknown[] {
 }
 
 export function upsertHook(settingsPath: string, spec: HookSpec): void {
-  const settings = readSettings(settingsPath);
+  const { doc: settings, format } = load(settingsPath);
   const raw = settingsHooks(settings)[spec.event];
   // 该事件已被别人写成非数组形状 —— 覆盖它会丢掉对方的配置，宁可不装也要说清楚。
   if (raw !== undefined && !Array.isArray(raw)) {
@@ -105,7 +126,7 @@ export function upsertHook(settingsPath: string, spec: HookSpec): void {
   baseHooks[spec.event] = others;
   settings.hooks = baseHooks;
 
-  atomicWrite(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  atomicWrite(settingsPath, render(settings, format));
 }
 
 function settingsHooks(settings: Record<string, unknown>): Record<string, unknown> {
@@ -114,10 +135,15 @@ function settingsHooks(settings: Record<string, unknown>): Record<string, unknow
   return hooks as Record<string, unknown>;
 }
 
-/** 移除我们注入的条目；其他内容保持不变。文件不存在、或里面根本没有我们的条目时静默返回。 */
+/**
+ * 移除我们注入的条目；其他内容保持不变，且缩进/结尾换行跟着原文件（卸载后要能逐字节还原）。
+ * 文件不存在、或里面根本没有我们的条目时静默返回。
+ * 摘完只剩空对象时删掉文件：空对象不承载任何用户信息，留着只会让人问"这是谁写的"。
+ */
 export function removeHook(settingsPath: string, event?: string): void {
-  if (!existsSync(settingsPath)) return;
-  const settings = readSettings(settingsPath);
+  const loaded = load(settingsPath);
+  if (!loaded.existed) return;
+  const settings = loaded.doc;
   const hooks = settings.hooks;
   if (hooks === null || typeof hooks !== 'object' || Array.isArray(hooks)) return;
 
@@ -137,7 +163,16 @@ export function removeHook(settingsPath: string, event?: string): void {
   if (!touched) return;
   if (Object.keys(bag).length === 0) delete settings.hooks;
 
-  atomicWrite(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+  if (Object.keys(settings).length === 0) {
+    try {
+      unlinkSync(settingsPath);
+    } catch {
+      /* 已被别人删掉或权限不允许：报告留给调用方，不在此抛出 */
+    }
+    return;
+  }
+
+  atomicWrite(settingsPath, render(settings, loaded.format));
 }
 
 export function hasHook(settingsPath: string, event: string): boolean {
