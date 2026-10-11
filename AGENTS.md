@@ -49,3 +49,14 @@
 - block 模式两个坑（注释在 `types.ts`，改 `core/apply.ts` 或 `cli/delivery.ts` 前先读）：适配器要把自己的合成 key
   `rules:team-rules-block` 放进 `activeResources`，否则每次 pull 误删区块；某 kind 停发时看 `Resolution.haltedKinds`
   整体跳过，因为空 writes 在 block 模式等于"清空区块"。
+- MCP 走**条目级合并**（`PlannedWrite.merge` + `LedgerEntry.managedKeys`）：落点是成员在用的共享配置文件，
+  所以这类路径**永不进 unlink 分支**，"被本地改过"只比我们自己那几个条目（JSON 用键排序后的规范化文本，
+  格式化抖动不算改过；TOML 按表块原文逐字节）。卸载时用 `managedKeys` 反向合并 `desired={}` 只撤自己那几条。
+- `mcp/mcp.yaml` 解析不出来 = MCP 整体停发，**不是空集**：当成空集会把全员已装的 server 全删掉。
+  判定在 `snapshot.mcpFileError`，`buildDelivery` 据此把 `mcp` 加进 `haltedKinds`，pull 退出码 1。
+- 工具有没有某项能力由 `paths.ts` 的表决定（`mcpTarget` 缺席 → 适配器不实现 `planMcp`），
+  **不要在适配器或渲染层按工具 id 写 if**。分派需要区分形态时把形态加进表（`mcpTarget.style`），别在代码里猜。
+- 新增 `ResourceKind` 只改三处：`types.ts` 的联合与 `RESOURCE_KINDS`、`plan.ts` 的 `KIND_ROOT` 表、
+  采集入口。`KindSet = Record<ResourceKind, Resource[]>` 是全总映射，漏一处直接编译失败 ——
+  别再引入 kind 白名单（`delivery.ts` 原来那句 `if (kind !== 'skills' && kind !== 'rules') continue`
+  会让新 kind 的"冲突停发"变成"全员删除"）。

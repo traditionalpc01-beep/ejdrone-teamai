@@ -35,6 +35,9 @@ skills/
 rules/
   code-style.md            # 全员
   fe/react-conventions.md
+mcp/
+  mcp.yaml                 # 全员共享的 MCP server
+  fe/mcp.yaml              # 只给 fe 角色
 ```
 
 定义角色：
@@ -88,6 +91,40 @@ ejdrone push --skill ~/.claude/skills/team-release --ns devops
 
 同一资源重复 push 会就地更新那条未合并的 MR，不开重复分支。
 
+## 下发 MCP server
+
+在 `mcp/mcp.yaml` 里声明一次，`pull` 时按每个工具的原生格式写进它自己的 MCP 配置文件：
+
+```yaml
+servers:
+  - name: gpu-analysis
+    description: GPU 存量与价格查询
+    transport: http            # stdio | http | sse
+    url: https://example.com/api/mcp
+    headers:
+      Authorization: Bearer ${GPU_ANALYSIS_TOKEN}   # 从成员自己的环境变量取，绝不写明文
+
+  - name: local-formatter
+    transport: stdio
+    command: npx
+    args: ['-y', '@acme/formatter-mcp']
+    requires: [npx]            # PATH 上没有 npx 的人跳过这条并点名
+    tools: [claude, cursor]    # 可选：只发给这些工具
+```
+
+三条要紧的规矩：
+
+- **只动我们那几条**。这些配置文件里通常已经有你自己的 server（Claude 那份还兼着工具的状态文件），
+  我们按条目合并：你在 `mcpServers` / `[mcp_servers.*]` 里写的东西一字不改，卸载也只撤我们自己那几条。
+- **你改过我们投的那条，就不覆盖**，`pull` 会点名到具体是哪一条 server。
+- **`${VAR}` 取不到值就整条跳过**并告诉你缺哪个变量；解析出来的值不会出现在任何输出、日志或记账里。
+
+`mcp/fe/mcp.yaml` 只发给激活了 `fe` 的角色；同名时 namespace 条目整体替换根条目（不做字段合并）。
+`mcp.yaml` 写坏（比如把 `servers:` 拼成 `server:`）会让本次 MCP 整体停发并点名文件，
+**不会**被当成"团队把 server 都删了"从而清空大家已装的内容。
+
+哪些工具有用户级 MCP 落点，见下面的投递矩阵；没有落点的工具收不到 MCP，也不会被凭空造出配置文件。
+
 ## 命令
 
 | 命令 | 作用 |
@@ -110,26 +147,28 @@ ejdrone push --skill ~/.claude/skills/team-release --ns devops
 
 16 个工具，全部只有 user scope。「真机核实」列是本机（macOS）逐项盘出来的，没核到的格子一律标出来，不猜。
 
-| 工具 | skills | rules | 真机核实 |
-|---|---|---|---|
-| Claude Code | `~/.claude/skills/` | `~/.claude/rules/*.md`（官方用户级载体，支持 `paths:` 按需加载） | 已核 |
-| Qoder CN | `~/.qoder-cn/skills/` | `~/.qoder-cn/rules/*.md` | 部分（rules 是否被读取未证） |
-| Qoder | `~/.qoder/skills/` | `~/.qoder/rules/*.md` | 部分（rules 与 hook 未证） |
-| Cursor | `~/.cursor/skills/` | `~/.cursor/rules/*.mdc` | 未核（本机未装） |
-| Codex | `~/.codex/skills/` | `~/.codex/AGENTS.md` 团队区块（其原生 `rules/` 是命令策略目录，非 markdown） | 部分（hook 未核） |
-| GitHub Copilot CLI | `~/.copilot/skills/`（或 `$COPILOT_HOME`） | `~/.copilot/AGENTS.md` 团队区块 | 未核（本机未装） |
-| CodeBuddy | `~/.codebuddy/skills/` | — | 部分（hook 未证） |
-| WorkBuddy | `~/.workbuddy/skills/` | — | 部分（hook 未证） |
-| OpenCode | `~/.config/opencode/skills/` | `~/.config/opencode/AGENTS.md` 团队区块 | 未核（本机未装） |
-| Pi Coding Agent | `~/.pi/agent/skills/` | — | skills 已核 |
-| OpenClaw | `~/.openclaw/skills/` | — | skills 已核（hook 是 workspace 级，user scope 不做） |
-| Hermes | `~/.hermes/skills/` | — | skills 已核（`~/.hermes/hooks` 是目录，非 JSON 载体） |
-| Kiro | `~/.kiro/skills/` | — | skills 已核（SessionStart 由 agent 同步内嵌，无用户级落点） |
-| Trae | `~/.trae/skills/` | `~/.trae/rules/*.md`（原生目录） | 已核（无 hook 落点） |
-| Trae CN | `~/.trae-cn/skills/` | `~/.trae-cn/user_rules/*.md` | 部分（该目录存在但为空） |
-| DeepSeek Harness | `~/.dsh/skills/`（或 `$DSH_HOME`） | `~/.dsh/AGENTS.md` 团队区块 | 未核（本机未装） |
+| 工具 | skills | rules | MCP 落点 | 真机核实 |
+|---|---|---|---|---|
+| Claude Code | `~/.claude/skills/` | `~/.claude/rules/*.md`（官方用户级载体，支持 `paths:` 按需加载） | `~/.claude.json` | 已核 |
+| Qoder CN | `~/.qoder-cn/skills/` | `~/.qoder-cn/rules/*.md` | `~/.qoder-cn/settings.json` | 部分（rules 是否被读取未证） |
+| Qoder | `~/.qoder/skills/` | `~/.qoder/rules/*.md` | `~/.qoder/mcp.json` | 部分（rules 与 hook 未证） |
+| Cursor | `~/.cursor/skills/` | `~/.cursor/rules/*.mdc` | `~/.cursor/mcp.json` | 未核（本机未装） |
+| Codex | `~/.codex/skills/` | `~/.codex/AGENTS.md` 团队区块（其原生 `rules/` 是命令策略目录，非 markdown） | `~/.codex/config.toml` | 部分（hook 未核） |
+| GitHub Copilot CLI | `~/.copilot/skills/`（或 `$COPILOT_HOME`） | `~/.copilot/AGENTS.md` 团队区块 | `~/.copilot/mcp-config.json` | 未核（本机未装） |
+| CodeBuddy | `~/.codebuddy/skills/` | — | `~/.codebuddy/.mcp.json` | 部分（hook 未证） |
+| WorkBuddy | `~/.workbuddy/skills/` | — | `~/.workbuddy/mcp.json` | 部分（hook 未证） |
+| OpenCode | `~/.config/opencode/skills/` | `~/.config/opencode/AGENTS.md` 团队区块 | `~/.config/opencode/opencode.json` | 未核（本机未装） |
+| Pi Coding Agent | `~/.pi/agent/skills/` | — | `~/.pi/agent/mcp.json` | skills 已核 |
+| OpenClaw | `~/.openclaw/skills/` | — | — | skills 已核（hook 是 workspace 级，user scope 不做） |
+| Hermes | `~/.hermes/skills/` | — | — | skills 已核（`~/.hermes/hooks` 是目录，非 JSON 载体） |
+| Kiro | `~/.kiro/skills/` | — | `~/.kiro/settings/mcp.json` | skills 已核（SessionStart 由 agent 同步内嵌，无用户级落点） |
+| Trae | `~/.trae/skills/` | `~/.trae/rules/*.md`（原生目录） | — | 已核（无 hook 落点） |
+| Trae CN | `~/.trae-cn/skills/` | `~/.trae-cn/user_rules/*.md` | — | 部分（该目录存在但为空） |
+| DeepSeek Harness | `~/.dsh/skills/`（或 `$DSH_HOME`） | `~/.dsh/AGENTS.md` 团队区块 | — | 未核（本机未装） |
 
 `—` = 该工具没有可写的 markdown rules 载体，团队规范不下发给它（宁可少投递，也不往它不读的位置硬写）。
+
+`—` = 该工具没有对应的用户级载体：`rules` 列的 `—` 表示团队规范不下发给它，`MCP 落点` 列的 `—` 表示 `mcp/` 里的 server 不下发给它（宁可少投递，也不往它不读的位置硬写文件）。
 
 **未核对的落点**由 `ejdrone doctor` 点名 —— 只报你在 `init` 里勾选的工具，没勾的折成一行提示，不刷屏。
 所有路径与核实状态集中在 `src/agents/paths.ts` 一张表里，某工具升级改了目录只改那一行。
