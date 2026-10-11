@@ -18,6 +18,12 @@ export interface Snapshot {
   /** 仓库里的全部资源，按 kind 分组（skills / rules / mcp） */
   kinds: KindSet;
   warnings: string[];
+  /**
+   * mcp 列表文件的文件级解析失败（非空时 kinds.mcp 为空集）。
+   * delivery 层必须像 haltedKinds 一样让 mcp 整体停发（已装内容不动）——
+   * 当成"团队删光了所有 server"处理会把全员已装条目清空。
+   */
+  mcpFileError: string | null;
 }
 
 export type SnapshotResult = { ok: true; snapshot: Snapshot } | { ok: false; error: string };
@@ -41,6 +47,7 @@ export async function openSnapshot(ctx: CliContext, repo: string): Promise<Snaps
         manifestError: parsed.error ?? null,
         kinds: collected.kinds,
         warnings: collected.warnings,
+        mcpFileError: collected.mcpFileError,
       },
     };
   } catch (e) {
@@ -62,5 +69,6 @@ export function readExistingSnapshot(ctx: CliContext): Snapshot | null {
     manifestError: parsed.error ?? null,
     kinds: collected.kinds,
     warnings: collected.warnings,
+    mcpFileError: collected.mcpFileError,
   };
 }

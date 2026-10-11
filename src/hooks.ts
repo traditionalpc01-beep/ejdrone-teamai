@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 /**
@@ -88,8 +88,12 @@ function isOurs(entry: unknown): boolean {
 
 function atomicWrite(filePath: string, text: string): void {
   mkdirSync(dirname(filePath), { recursive: true });
+  // 真机 ~/.qoder-cn/settings.json、~/.codex/config.toml 都是 0600：临时文件按目标原权限创建，
+  // rename 后权限不因我们重写一次而放宽（新建文件维持 umask 默认，行为与旧版一致）。
+  const prevMode = existsSync(filePath) ? statSync(filePath).mode & 0o777 : undefined;
   const tmp = `${filePath}.tmp-${process.pid}`;
-  writeFileSync(tmp, text, 'utf8');
+  if (prevMode === undefined) writeFileSync(tmp, text, 'utf8');
+  else writeFileSync(tmp, text, { encoding: 'utf8', mode: prevMode });
   renameSync(tmp, filePath);
 }
 

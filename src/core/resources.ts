@@ -3,11 +3,18 @@ import { join, relative, sep } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import type { Dirent } from 'node:fs';
 import { emptyKinds, type KindSet, type Resource, type RolesManifest } from './types.js';
+import { collectMcp } from './mcp.js';
 
 export interface CollectedResources {
-  /** 按 kind 分组；mcp 由 core/mcp.ts 解析列表文件后填进来 */
+  /** 按 kind 分组；mcp 由 core/mcp.ts 解析列表文件后在这里填进 kinds.mcp */
   kinds: KindSet;
   warnings: string[];
+  /**
+   * mcp 列表文件的文件级解析失败（非空时 kinds.mcp 为空集）。
+   * 消费方（delivery 层）据此让 mcp kind 整体停发、已装内容不动 ——
+   * 把失败当"空集合"会把全员已装的 server 整体删掉（teamai 教训）。
+   */
+  mcpFileError: string | null;
 }
 
 function listDir(dirPath: string): Dirent[] {
@@ -85,8 +92,11 @@ export function collectResources(
   collectRules(join(checkoutRoot, 'rules'), manifestNs, kinds.rules, warnings);
 
   // mcp/ 是列表文件（mcp/mcp.yaml），不是一个目录树，解析在 core/mcp.ts。
-  // 这里留空集合，由 snapshot 层把 mcp 条目并进 kinds.mcp。
-  return { kinds, warnings };
+  const mcp = collectMcp(checkoutRoot, manifestNs);
+  kinds.mcp.push(...mcp.servers);
+  warnings.push(...mcp.warnings);
+
+  return { kinds, warnings, mcpFileError: mcp.fileError };
 }
 
 function collectSkills(

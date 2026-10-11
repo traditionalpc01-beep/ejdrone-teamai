@@ -33,6 +33,52 @@ describe('loadLedger', () => {
     expect(loadLedger(p)).toEqual({ ledger: { version: 1, entries: [] } });
   });
 
+  it('2.0 managedKeys 是可选字段：1.0 旧账本（没有它）必须仍然合法', () => {
+    // 回落空账本 = 下次 pull 把全体成员的已投文件当"别人的文件"永久保留，回归极重，
+    // 所以"旧格式合法"必须钉死成独立用例。
+    const dir = tmp();
+    const p = join(dir, 'ledger.json');
+    const legacy = JSON.stringify({
+      version: 1,
+      entries: [{ path: '/x/SKILL.md', hash: 'sha256:abc', resource: 'skills:x', deliveredAt: 't' }],
+    });
+    writeFileSync(p, legacy, 'utf8');
+    const res = loadLedger(p);
+    expect(res.warning).toBeUndefined();
+    expect(res.ledger.entries[0]).toEqual({
+      path: '/x/SKILL.md',
+      hash: 'sha256:abc',
+      resource: 'skills:x',
+      deliveredAt: 't',
+    });
+    expect('managedKeys' in (res.ledger.entries[0] as object)).toBe(false); // 缺 = 空集，不造字段
+  });
+
+  it('managedKeys 读写往返无损；结构坏的 managedKeys 判非法（不误当空集投回去）', () => {
+    const dir = tmp();
+    const p = join(dir, 'ledger.json');
+    const ledger: Ledger = {
+      version: 1,
+      entries: [
+        {
+          path: '/x/.claude.json',
+          hash: 'sha256:fp',
+          resource: 'mcp:alpha',
+          deliveredAt: 't',
+          managedKeys: { alpha: 'sha256:1', beta: 'sha256:2' },
+        },
+      ],
+    };
+    saveLedger(p, ledger);
+    expect(loadLedger(p).ledger).toEqual(ledger);
+
+    const bad = join(dir, 'ledger-bad.json');
+    writeFileSync(bad, JSON.stringify({ version: 1, entries: [{ ...ledger.entries[0], managedKeys: 'oops' }] }), 'utf8');
+    const res = loadLedger(bad);
+    expect(res.warning).toBeDefined();
+    expect(res.ledger.entries).toEqual([]);
+  });
+
   it('loads a valid ledger', () => {
     const dir = tmp();
     const p = join(dir, 'ledger.json');

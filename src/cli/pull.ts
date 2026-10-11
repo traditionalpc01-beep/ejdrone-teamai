@@ -26,13 +26,15 @@ export interface PullOutcome {
   conflicts: number;
 }
 
-const FORCE_IGNORED = '（区块投递不受 --force 影响：只动标记内的团队区块）';
+const FORCE_IGNORED = '（区块与受管条目投递不受 --force 影响：只动标记内区块 / 只动我们自己的条目）';
 
 /** 覆盖前删掉整文件目标的旧内容，让 applyPlan 走"文件不存在 → 写入"分支。 */
 function forceOverwrite(writes: PlannedWrite[], ledger: Ledger): number {
   let removed = 0;
   for (const write of writes) {
-    if (write.region) continue;
+    // region 只动标记内；merge 的文件是成员在用的共享配置（~/.claude.json 等），
+    // unlink 会把成员的条目和工具状态一起删掉 —— 两者都不进覆盖路径，交 apply 逐条判定。
+    if (write.region || write.merge) continue;
     if (!existsSync(write.path)) continue;
     // 只覆盖我们投递过的文件。从未记账的同名文件是用户自己的东西，
     // --force 也不能删（交给 applyPlan 判成 foreign-file 保留）。

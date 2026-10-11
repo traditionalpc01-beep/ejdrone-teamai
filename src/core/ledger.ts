@@ -35,12 +35,22 @@ function validateLedger(parsed: unknown): { ok: true; ledger: Ledger } | { ok: f
     ) {
       return { ok: false, reason: 'entry needs path, hash, resource and deliveredAt strings' };
     }
-    entries.push({
+    const entry: LedgerEntry = {
       path: raw.path,
       hash: raw.hash,
       resource: raw.resource,
       deliveredAt: raw.deliveredAt,
-    });
+    };
+    // 2.0 merge 投递的逐键记账。**必须可选**：1.0 的旧账本没有这个字段，若判非法 → 回落空账本，
+    // 下次 pull 会把全体成员的已投文件当"别人的文件"永久保留（回归比缺字段严重得多）。
+    // 读出来缺 = 空集；读出来坏 = 非法（我们自己写出的从不坏；回落只针对真损坏）。
+    if (raw.managedKeys !== undefined) {
+      if (!isRecord(raw.managedKeys) || !Object.values(raw.managedKeys).every((v) => typeof v === 'string')) {
+        return { ok: false, reason: 'managedKeys must map entry keys to hash strings' };
+      }
+      entry.managedKeys = raw.managedKeys as Record<string, string>;
+    }
+    entries.push(entry);
   }
   return { ok: true, ledger: { version: parsed.version, entries } };
 }

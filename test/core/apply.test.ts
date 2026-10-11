@@ -1,9 +1,20 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyPlan } from '../../src/core/apply.js';
 import { hashContent } from '../../src/core/ledger.js';
+import { hasHook, removeHook, upsertHook } from '../../src/hooks.js';
 import type { ApplyInput, Ledger, LedgerEntry, PlannedWrite } from '../../src/core/types.js';
 
 const START = '<!-- ejdrone:team-rules:start -->';
@@ -288,5 +299,282 @@ describe('applyPlan: idempotency across writes and deletes', () => {
     expect(run2.result.written).toEqual([]);
     expect(run2.result.deleted).toEqual([]);
     expect(run2.ledger.entries.map((e) => e.path)).toEqual([pathNew]);
+  });
+});
+
+// ---------------------------------------------------------------- M6：merge 投递
+
+function memberClaudeJson(): string {
+  return `${JSON.stringify(
+    {
+      userID: 'user-1',
+      cachedGrowthBookFeatures: { 'flag-a': true },
+      mcpServers: { mcpServers: { command: 'scar' }, personal: { command: 'mine' } },
+    },
+    null,
+    2,
+  )}\n`;
+}
+
+function mergeJsonWrite(path: string, resource: string, entries: Record<string, string>): PlannedWrite {
+  return { path, content: '', resource, merge: { format: 'json', pointer: ['mcpServers'], entries } };
+}
+
+const ALPHA = '{"command":"npx","args":["-y","alpha"]}';
+const BETA = '{"url":"https://beta.example/mcp"}';
+
+describe('applyPlan: merge delivery (受管条目合并)', () => {
+  it('首次 apply：只写我们的条目，成员条目原样，ledger 记 managedKeys', () => {
+    const path = join(home, '.claude.json');
+    seedFile(path, memberClaudeJson());
+    chmodSync(path, 0o644);
+    const w = mergeJsonWrite(path, 'mcp:alpha', { alpha: ALPHA });
+    const out = applyPlan(makeInput({ writes: [w], activeResources: ['mcp:alpha'] }));
+
+    expect(out.result.written).toEqual([w]);
+    expect(out.result.kept).toEqual([]);
+    const doc = JSON.parse(readFileSync(path, 'utf8')) as {
+      userID: string;
+      mcpServers: Record<string, unknown>;
+    };
+    expect(doc.mcpServers.alpha).toEqual({ command: 'npx', args: ['-y', 'alpha'] });
+    expect(doc.mcpServers.personal).toEqual({ command: 'mine' }); // 规则 4：成员的键原样
+    expect(doc.userID).toBe('user-1');
+
+    const entry = out.ledger.entries[0] as LedgerEntry;
+    expect(entry.path).toBe(path);
+    expect(entry.resource).toBe('mcp:alpha');
+    expect(Object.keys(entry.managedKeys ?? {})).toEqual(['alpha']);
+    // merge 条目的 hash 是"我们那几个键"的指纹，不是整文件哈希
+    expect(entry.hash).not.toBe(hashContent(readFileSync(path, 'utf8')));
+    // 成员权限不被打扰（本轮无已解析值入参）
+    expect(statSync(path).mode & 0o777).toBe(0o644);
+  });
+
+  it('二次 apply：changed=false，一个字节都不写，ledger 条目不变', () => {
+    const path = join(home, '.claude.json');
+    seedFile(path, memberClaudeJson());
+    const w = mergeJsonWrite(path, 'mcp:alpha', { alpha: ALPHA });
+    const run1 = applyPlan(makeInput({ writes: [w], activeResources: ['mcp:alpha'] }));
+    const bytes = readFileSync(path, 'utf8');
+
+    const run2 = applyPlan(makeInput({ writes: [w], activeResources: ['mcp:alpha'], ledger: run1.ledger }));
+    expect(run2.result.written).toEqual([]);
+    expect(run2.result.kept).toEqual([]);
+    expect(readFileSync(path, 'utf8')).toBe(bytes);
+    expect(run2.ledger.entries).toEqual(run1.ledger.entries); // 指纹稳定 + 幂等
+  });
+
+  it('成员改过我们那条：kept(modified-locally)，文件不被覆盖，账本保留旧哈希继续追踪', () => {
+    const path = join(home, '.claude.json');
+    seedFile(path, memberClaudeJson());
+    const w = mergeJsonWrite(path, 'mcp:alpha', { alpha: ALPHA });
+    const run1 = applyPlan(makeInput({ writes: [w], activeResources: ['mcp:alpha'] }));
+    const memberEdited = readFileSync(path, 'utf8').replace('"command": "npx"', '"command": "member-own"');
+    seedFile(path, memberEdited);
+
+    const run2 = applyPlan(
+      makeInput({
+        writes: [mergeJsonWrite(path, 'mcp:alpha', { alpha: '{"command":"team-v2"}' })],
+        activeResources: ['mcp:alpha'],
+        ledger: run1.ledger,
+      }),
+    );
+    expect(run2.result.written).toEqual([]);
+    expect(run2.result.kept).toEqual([{ path, resource: 'mcp:alpha', reason: 'modified-locally' }]);
+    expect(readFileSync(path, 'utf8')).toBe(memberEdited); // 一个字都不动
+    expect(run2.ledger.entries[0]?.managedKeys).toEqual(run1.ledger.entries[0]?.managedKeys);
+  });
+
+  it('本次不再投该 server：条目被删而成员条目原样；最后的条目删完 → 记账消失、文件绝不 unlink', () => {
+    const path = join(home, '.claude.json');
+    seedFile(path, memberClaudeJson());
+    const run1 = applyPlan(
+      makeInput({ writes: [mergeJsonWrite(path, 'mcp:alpha', { alpha: ALPHA })], activeResources: ['mcp:alpha'] }),
+    );
+    const run2 = applyPlan(
+      makeInput({
+        writes: [mergeJsonWrite(path, 'mcp:beta', { beta: BETA })],
+        activeResources: ['mcp:beta'],
+        ledger: run1.ledger,
+      }),
+    );
+    let doc = JSON.parse(readFileSync(path, 'utf8')) as { mcpServers: Record<string, unknown> };
+    expect('alpha' in doc.mcpServers).toBe(false); // 规则 3：没改过 → 删
+    expect(doc.mcpServers.beta).toEqual({ url: 'https://beta.example/mcp' });
+    expect(doc.mcpServers.personal).toEqual({ command: 'mine' });
+    expect(Object.keys(run2.ledger.entries[0]?.managedKeys ?? {})).toEqual(['beta']);
+
+    // 停投最后一个：文件里只剩成员内容，账本条目消失，但文件还在（成员在用）
+    const run3 = applyPlan(
+      makeInput({
+        writes: [mergeJsonWrite(path, 'mcp:beta', {})],
+        activeResources: ['mcp:beta'],
+        ledger: run2.ledger,
+      }),
+    );
+    expect(run3.result.written).toHaveLength(1);
+    expect(run3.ledger.entries).toEqual([]);
+    expect(existsSync(path)).toBe(true);
+    doc = JSON.parse(readFileSync(path, 'utf8')) as { mcpServers: Record<string, unknown> };
+    expect(doc.mcpServers).toEqual({ mcpServers: { command: 'scar' }, personal: { command: 'mine' } });
+  });
+
+  it('merge path 永不进 unlink 分支：账本条目停发也只保留（比对整文件哈希都不做）', () => {
+    const path = join(home, '.claude.json');
+    seedFile(path, memberClaudeJson());
+    const stale: LedgerEntry = {
+      path,
+      hash: 'sha256:whatever',
+      resource: 'mcp:gone',
+      deliveredAt: ISO,
+      managedKeys: { gone: 'sha256:abc' },
+    };
+    const out = applyPlan(makeInput({ activeResources: [], ledger: ledgerWith([stale]) }));
+    expect(out.result.deleted).toEqual([]);
+    expect(out.result.kept).toEqual([]);
+    expect(existsSync(path)).toBe(true);
+    expect(out.ledger.entries).toEqual([stale]); // 记账保留，下次 pull 由 merge 规则接手
+  });
+
+  it('两个 PlannedWrite 指向同一 path：合并成一次 merge 调用，desired 取并集', () => {
+    const path = join(home, '.claude.json');
+    seedFile(path, memberClaudeJson());
+    const wA = mergeJsonWrite(path, 'mcp:alpha', { alpha: ALPHA });
+    const wB = mergeJsonWrite(path, 'mcp:beta', { beta: BETA });
+    const out = applyPlan(makeInput({ writes: [wA, wB], activeResources: ['mcp:alpha', 'mcp:beta'] }));
+    expect(out.result.written).toEqual([wA, wB]);
+    const doc = JSON.parse(readFileSync(path, 'utf8')) as { mcpServers: Record<string, unknown> };
+    expect(Object.keys(doc.mcpServers).sort()).toEqual(['beta', 'mcpServers', 'personal', 'alpha'].sort());
+    expect(out.ledger.entries).toHaveLength(1);
+    expect(Object.keys(out.ledger.entries[0]?.managedKeys ?? {}).sort()).toEqual(['alpha', 'beta']);
+
+    const out2 = applyPlan(
+      makeInput({ writes: [wA, wB], activeResources: ['mcp:alpha', 'mcp:beta'], ledger: out.ledger }),
+    );
+    expect(out2.result.written).toEqual([]); // 并集没有互相覆盖丢键 → 幂等
+  });
+
+  it('文件解析失败：整体跳过该工具，不落盘、不记账、不留临时文件', () => {
+    const path = join(home, '.claude.json');
+    seedFile(path, '{ broken LEAK-CANARY');
+    const w = mergeJsonWrite(path, 'mcp:alpha', { alpha: ALPHA });
+    const out = applyPlan(makeInput({ writes: [w], activeResources: ['mcp:alpha'] }));
+    expect(out.result.written).toEqual([]);
+    expect(out.result.kept).toEqual([]);
+    expect(out.ledger.entries).toEqual([]);
+    expect(readFileSync(path, 'utf8')).toBe('{ broken LEAK-CANARY');
+    const leftovers = readdirSync(home).filter((f) => f.includes('ejdrone-tmp') || f.includes('.tmp-'));
+    expect(leftovers).toEqual([]);
+  });
+
+  it('渲染阶段抛错（未知 format = 内部 bug）：同计划里的普通写入也一次都不落盘', () => {
+    const plainPath = join(home, 'skills', 'foo', 'SKILL.md');
+    const mergePath = join(home, '.claude.json');
+    const plain: PlannedWrite = { path: plainPath, content: 'body', resource: 'skills:foo' };
+    const bad: PlannedWrite = {
+      path: mergePath,
+      content: '',
+      resource: 'mcp:z',
+      merge: { format: 'yaml' as unknown as 'json', pointer: ['mcpServers'], entries: { z: '{}' } },
+    };
+    expect(() => applyPlan(makeInput({ writes: [plain, bad], activeResources: ['skills:foo', 'mcp:z'] }))).toThrow();
+    expect(existsSync(plainPath)).toBe(false); // 写前先算完整 plan：一个 writeFileSync 都没跑
+    expect(existsSync(mergePath)).toBe(false);
+  });
+
+  it('TOML：投递进成员手写的 config.toml，块外字节不变；二次 apply 幂等；0600 保持', () => {
+    const path = join(home, 'codex', 'config.toml');
+    const tomlText = [
+      '# user note',
+      'model = "gpt-5"',
+      '',
+      '[features]',
+      'x = true',
+      '',
+      '[mcp_servers.member]',
+      'command = "own"',
+      '',
+    ].join('\n');
+    seedFile(path, tomlText);
+    chmodSync(path, 0o600);
+    const w: PlannedWrite = {
+      path,
+      content: '',
+      resource: 'mcp:team',
+      merge: {
+        format: 'toml',
+        pointer: ['mcp_servers'],
+        entries: { team: '[mcp_servers.team]\ncommand = "npx"\n\n[mcp_servers.team.env]\nTOKEN = "v"\n' },
+      },
+    };
+    const out = applyPlan(makeInput({ writes: [w], activeResources: ['mcp:team'] }));
+    expect(out.result.written).toEqual([w]);
+    const after = readFileSync(path, 'utf8');
+    expect(after).toContain('# user note');
+    expect(after).toContain('[mcp_servers.member]\ncommand = "own"\n');
+    expect(after).toContain('[mcp_servers.team]\ncommand = "npx"');
+    expect(after).toContain('[mcp_servers.team.env]\nTOKEN = "v"');
+    expect(Object.keys(out.ledger.entries[0]?.managedKeys ?? {})).toEqual(['team']);
+    expect(statSync(path).mode & 0o777).toBe(0o600); // 原有权限保持
+
+    const out2 = applyPlan(makeInput({ writes: [w], activeResources: ['mcp:team'], ledger: out.ledger }));
+    expect(out2.result.written).toEqual([]);
+    expect(readFileSync(path, 'utf8')).toBe(after);
+  });
+
+  it('含已解析 ${VAR} 值：显式入参路径 → 0600（原本 0644 的也收紧）；新建 merge 文件恒 0600', () => {
+    const path = join(home, '.claude.json');
+    seedFile(path, memberClaudeJson());
+    chmodSync(path, 0o644);
+    const w = mergeJsonWrite(path, 'mcp:alpha', { alpha: '{"env":{"TOKEN":"s"}}' });
+    applyPlan(makeInput({ writes: [w], activeResources: ['mcp:alpha'] }), { resolvedValuePaths: [path] });
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+
+    const fresh = join(home, 'fresh', '.claude.json');
+    const w2 = mergeJsonWrite(fresh, 'mcp:alpha', { alpha: ALPHA });
+    applyPlan(makeInput({ writes: [w2], activeResources: ['mcp:alpha'] }));
+    expect(statSync(fresh).mode & 0o777).toBe(0o600); // 规则 5：新建就收紧
+
+    const plainPath = join(home, 'secret.md');
+    const plain: PlannedWrite = { path: plainPath, content: 'has-resolved', resource: 'skills:p' };
+    applyPlan(makeInput({ writes: [plain], activeResources: ['skills:p'] }), { resolvedValuePaths: [plainPath] });
+    expect(statSync(plainPath).mode & 0o777).toBe(0o600);
+  });
+
+  it('同一个 settings.json：先装 hook 再 merge mcp 条目，两条写路径互不破坏', () => {
+    const settings = join(home, 'qoder-cn', 'settings.json');
+    seedFile(
+      settings,
+      `${JSON.stringify(
+        { enabledPlugins: { 'p-a': true }, mcpServers: { GitHub: { url: 'https://gh' } } },
+        null,
+        2,
+      )}\n`,
+    );
+    chmodSync(settings, 0o600); // 真机 ~/.qoder-cn/settings.json 是 0600
+    const SPEC = { event: 'SessionStart', cmd: 'EJDRONE_HOOK=1 /node /cli.js pull --silent' };
+    upsertHook(settings, SPEC);
+
+    const w = mergeJsonWrite(settings, 'mcp:team', { team: '{"command":"npx"}' });
+    const run1 = applyPlan(makeInput({ writes: [w], activeResources: ['mcp:team'] }));
+    expect(run1.result.written).toEqual([w]);
+    let doc = JSON.parse(readFileSync(settings, 'utf8')) as Record<string, any>;
+    expect(hasHook(settings, 'SessionStart')).toBe(true); // merge 没伤 hooks 键
+    expect(doc.mcpServers.GitHub).toEqual({ url: 'https://gh' }); // hook 写回没伤成员 mcp 键
+    expect(doc.mcpServers.team).toEqual({ command: 'npx' });
+    expect(doc.enabledPlugins).toEqual({ 'p-a': true });
+    expect(statSync(settings).mode & 0o777).toBe(0o600);
+
+    const run2 = applyPlan(
+      makeInput({ writes: [w], activeResources: ['mcp:team'], ledger: run1.ledger }),
+    );
+    expect(run2.result.written).toEqual([]); // 与 hook 共存的格式回环下仍幂等
+
+    removeHook(settings, 'SessionStart'); // hook 卸载也不得带走我们的条目
+    doc = JSON.parse(readFileSync(settings, 'utf8')) as Record<string, any>;
+    expect(hasHook(settings, 'SessionStart')).toBe(false);
+    expect(doc.mcpServers.team).toEqual({ command: 'npx' });
+    expect(doc.mcpServers.GitHub).toEqual({ url: 'https://gh' });
   });
 });
