@@ -40,9 +40,9 @@ describe('collectResources: skills', () => {
     const base = tmp();
     file(base, 'skills/team-release/SKILL.md', '# Release\n');
     const res = collectResources(base, null);
-    expect(skillNames(res.skills)).toEqual(['<root>/team-release']);
-    expect(res.skills[0]?.namespace).toBe('');
-    expect(res.skills[0]?.files['SKILL.md']).toBe('# Release\n');
+    expect(skillNames(res.kinds.skills)).toEqual(['<root>/team-release']);
+    expect(res.kinds.skills[0]?.namespace).toBe('');
+    expect(res.kinds.skills[0]?.files['SKILL.md']).toBe('# Release\n');
     expect(res.warnings).toEqual([]);
   });
 
@@ -52,8 +52,8 @@ describe('collectResources: skills', () => {
     file(base, 'skills/fe/fe-code-review/references/guide.md', 'guide');
     file(base, 'skills/fe/fe-code-review/scripts/run.sh', 'run');
     const res = collectResources(base, manifestWith('fe'));
-    expect(skillNames(res.skills)).toEqual(['fe/fe-code-review']);
-    const files = res.skills[0]?.files ?? {};
+    expect(skillNames(res.kinds.skills)).toEqual(['fe/fe-code-review']);
+    const files = res.kinds.skills[0]?.files ?? {};
     expect(Object.keys(files).sort()).toEqual(['SKILL.md', 'references/guide.md', 'scripts/run.sh']);
     expect(files['references/guide.md']).toBe('guide');
   });
@@ -62,7 +62,7 @@ describe('collectResources: skills', () => {
     const base = tmp();
     file(base, 'skills/broken/README.md', 'nope');
     const res = collectResources(base, null);
-    expect(res.skills).toEqual([]);
+    expect(res.kinds.skills).toEqual([]);
     expect(res.warnings.some((w) => w.includes('skills/broken') && /SKILL\.md/.test(w))).toBe(true);
   });
 
@@ -71,7 +71,7 @@ describe('collectResources: skills', () => {
     file(base, 'skills/fe/real/SKILL.md', 'ok');
     file(base, 'skills/fe/notaskill/other.md', 'no');
     const res = collectResources(base, manifestWith('fe'));
-    expect(skillNames(res.skills)).toEqual(['fe/real']);
+    expect(skillNames(res.kinds.skills)).toEqual(['fe/real']);
     expect(res.warnings.some((w) => w.includes('skills/fe/notaskill'))).toBe(true);
   });
 
@@ -80,7 +80,7 @@ describe('collectResources: skills', () => {
     file(base, 'skills/fe/real/SKILL.md', 'ok');
     file(base, 'skills/fe/deep/inner/SKILL.md', 'too deep');
     const res = collectResources(base, manifestWith('fe'));
-    expect(skillNames(res.skills)).toEqual(['fe/real']);
+    expect(skillNames(res.kinds.skills)).toEqual(['fe/real']);
     expect(res.warnings.some((w) => w.includes('skills/fe/deep'))).toBe(true);
   });
 
@@ -89,7 +89,7 @@ describe('collectResources: skills', () => {
     file(base, 'skills/multi/SKILL.md', 'real');
     symlinkSync(join(base, 'skills', 'multi'), join(base, 'skills', 'linkdir'), 'dir');
     const res = collectResources(base, null);
-    expect(skillNames(res.skills)).toEqual(['<root>/multi']);
+    expect(skillNames(res.kinds.skills)).toEqual(['<root>/multi']);
     expect(res.warnings.some((w) => w.includes('skills/linkdir') && /symlink/.test(w))).toBe(true);
   });
 });
@@ -101,8 +101,8 @@ describe('collectResources: root-vs-namespace ambiguity (skills)', () => {
     file(base, 'skills/pkg/sub/SKILL.md', 'sub skill');
     const res = collectResources(base, null);
     // pkg is a root skill; its subdir SKILL.md becomes just a file of pkg, not a separate skill
-    expect(skillNames(res.skills)).toEqual(['<root>/pkg']);
-    expect(Object.keys(res.skills[0]?.files ?? {}).sort()).toEqual(['SKILL.md', 'sub/SKILL.md']);
+    expect(skillNames(res.kinds.skills)).toEqual(['<root>/pkg']);
+    expect(Object.keys(res.kinds.skills[0]?.files ?? {}).sort()).toEqual(['SKILL.md', 'sub/SKILL.md']);
   });
 
   it('treats the SAME dir as a namespace once declared in the manifest', () => {
@@ -111,7 +111,7 @@ describe('collectResources: root-vs-namespace ambiguity (skills)', () => {
     file(base, 'skills/pkg/sub/SKILL.md', 'sub skill');
     const res = collectResources(base, manifestWith('pkg'));
     // pkg is now a namespace: own SKILL.md ignored, subdir becomes the entry
-    expect(skillNames(res.skills)).toEqual(['pkg/sub']);
+    expect(skillNames(res.kinds.skills)).toEqual(['pkg/sub']);
   });
 });
 
@@ -121,23 +121,23 @@ describe('collectResources: rules', () => {
     file(base, 'rules/code-style.md', '# style');
     file(base, 'rules/fe/react-conventions.md', '# react');
     const res = collectResources(base, manifestWith('fe'));
-    expect(skillNames(res.rules)).toEqual(['<root>/code-style', 'fe/react-conventions']);
-    expect(res.rules[0]?.files.content).toBe('# style');
-    expect(res.rules[1]?.files.content).toBe('# react');
+    expect(skillNames(res.kinds.rules)).toEqual(['<root>/code-style', 'fe/react-conventions']);
+    expect(res.kinds.rules[0]?.files.content).toBe('# style');
+    expect(res.kinds.rules[1]?.files.content).toBe('# react');
   });
 
   it('treats a directory containing .md files as a namespace, not an entry', () => {
     const base = tmp();
     file(base, 'rules/notes/a.md', 'a');
     const res = collectResources(base, null);
-    expect(skillNames(res.rules)).toEqual(['notes/a']);
+    expect(skillNames(res.kinds.rules)).toEqual(['notes/a']);
   });
 
   it('skips a rules directory with no .md files and no manifest declaration', () => {
     const base = tmp();
     file(base, 'rules/notes/readme.txt', 'txt');
     const res = collectResources(base, null);
-    expect(res.rules).toEqual([]);
+    expect(res.kinds.rules).toEqual([]);
     expect(res.warnings.some((w) => w.includes('rules/notes'))).toBe(true);
   });
 
@@ -145,7 +145,7 @@ describe('collectResources: rules', () => {
     const base = tmp();
     dir(base, 'rules/qa');
     const res = collectResources(base, manifestWith('qa'));
-    expect(res.rules).toEqual([]);
+    expect(res.kinds.rules).toEqual([]);
     expect(res.warnings).toEqual([]);
   });
 
@@ -153,7 +153,7 @@ describe('collectResources: rules', () => {
     const base = tmp();
     file(base, 'rules/fe/sub/deep.md', 'x');
     const res = collectResources(base, manifestWith('fe'));
-    expect(res.rules).toEqual([]);
+    expect(res.kinds.rules).toEqual([]);
     expect(res.warnings.some((w) => w.includes('rules/fe/sub'))).toBe(true);
   });
 });

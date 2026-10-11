@@ -9,19 +9,53 @@
 
 // ---------------------------------------------------------------- 资源模型
 
-/** v1 只做两类。预留 'mcp' | 'env'，新增一类不得改动下面的算法签名。 */
-export type ResourceKind = 'skills' | 'rules';
-
 /**
- * 一条团队资源。
+ * 2.0 M6：新增 'mcp'。后续里程碑（M7 子 Agent、M8 团队知识、M9 经验沉淀）各自再加，
+ * 加进这个联合类型后 `KindSet` 会强制所有分派点补齐 —— 漏一处就编译不过。
+ */
+export type ResourceKind = 'skills' | 'rules' | 'mcp';
+
+/** 全部资源类型的集合；装配与测试用 `emptyKinds()` 起头。 */
+export type KindSet = Record<ResourceKind, Resource[]>;
+
+/** 一条团队资源。
  * namespace === '' 表示仓库根目录条目（全员共享）。
- * files: skills 为「仓库内相对路径 → 内容」（必含 SKILL.md）；rules 为 { content: 正文 }。
+ * files: skills 为「仓库内相对路径 → 内容」（必含 SKILL.md）；rules 为 { content: 正文 }；
+ * mcp 为空对象，结构化内容在 payload（`mcp/mcp.yaml` 是列表文件，解析后一个 server 一条 Resource）。
  */
 export interface Resource {
   kind: ResourceKind;
   namespace: string;
   name: string;
   files: Record<string, string>;
+  /** 仅 kind === 'mcp' 使用；其他 kind 必须为 undefined。 */
+  payload?: McpServerDef;
+}
+
+/** `mcp/mcp.yaml` 里一个 server 条目（字段形状与 ${VAR} 约定见设计文档 2.0 §3.1）。 */
+export interface McpServerDef {
+  description?: string;
+  transport: 'stdio' | 'http' | 'sse';
+  /** http / sse 用 */
+  url?: string;
+  headers?: Record<string, string>;
+  timeoutMs?: number;
+  /** stdio 用 */
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  /** 这些可执行文件在 PATH 上找不到时跳过该 server 并点名 */
+  requires?: string[];
+  /** 只下发给这些工具 id；缺省 = 所有声明了 mcpTarget 的工具 */
+  tools?: string[];
+}
+
+/** 取 mcp 资源的结构化内容；缺失说明上游装配写错了（内部不变量，直接抛）。 */
+export function mcpPayload(resource: Resource): McpServerDef {
+  if (resource.kind !== 'mcp' || !resource.payload) {
+    throw new Error(`mcp payload missing: ${resourceKey(resource.kind, resource.name)}`);
+  }
+  return resource.payload;
 }
 
 /** resource 的唯一键，用于 ledger 与冲突报告。 */
@@ -64,36 +98,21 @@ export interface Config {
   agents: string[];
 }
 
-// ------------------------------------------------------------------ 仓库快照
-
-/** 一次 pull 读到的团队仓库快照（由 git/repo.ts 采集，core/resources.ts 解析填充） */
-export interface RepoSnapshot {
-  /** checkout 绝对路径 */
-  root: string;
-  /** manifest 解析结果 */
-  manifest: ManifestParseResult;
-  skills: Resource[];
-  rules: Resource[];
-  /** 仓库内被跳过的条目（如缺 SKILL.md），人类可读 */
-  warnings: string[];
-}
-
 // ---------------------------------------------------------------------- plan
 
 export interface ResolveInput {
-  skills: Resource[];
-  rules: Resource[];
+  /** 待裁决的全部资源，按 kind 分组（用 emptyKinds() 起头装配） */
+  kinds: KindSet;
   /** primaryRole + additionalRoles 映射出的 namespace 并集 */
   activeNamespaces: string[];
 }
 
 /**
- * 纯函数的命名空间裁决结果（设计文档 §7 步骤 1-3）。
+ * 纯函数的命名空间裁决结果（设计文档 §7 步骤 1-3），逐 kind 一套。
  * conflicts 非空时，该 kind 本次整体停发，其他 kind 不受影响。
  */
 export interface Resolution {
-  skills: Resource[];
-  rules: Resource[];
+  kinds: KindSet;
   conflicts: string[];
   warnings: string[];
   /**
@@ -101,6 +120,22 @@ export interface Resolution {
    * 空数组对 block 模式适配器意味着"清空团队区块"，而停发要求的是"不动已装内容"。
    */
   haltedKinds: ResourceKind[];
+}
+
+/** 空的 kind 集合；装配数据与测试都用它起头，新增 kind 时编译期会提醒补全所有分派点。 */
+export const RESOURCE_KINDS: ResourceKind[] = ['skills', 'rules', 'mcp'];
+
+export function emptyKinds(): KindSet {
+  const kinds = {} as KindSet;
+  for (const kind of RESOURCE_KINDS) kinds[kind] = [];
+  return kinds;
+}
+
+/** 把按 kind 分组的资源摊平成一个列表（列表类命令用）。 */
+export function allResources(kinds: KindSet): Resource[] {
+  const out: Resource[] = [];
+  for (const kind of RESOURCE_KINDS) out.push(...kinds[kind]);
+  return out;
 }
 
 /** 待写入的一个文件（绝对路径） */
@@ -117,6 +152,19 @@ export interface PlannedWrite {
    *    AGENTS.md 内容会被误判为"团队区块被改过"
    */
   region?: { start: string; end: string };
+  /**
+   * 条目级合并（MCP 这类共享配置文件）专用，与 region 互斥。存在时 content 不整文件写入，
+   * 由 core/merge.ts 读原文件、只增删改 entries 里那几个键：
+   *  - pointer 指向条目表位置（JSON 键路径，如 ['mcpServers']；TOML 时为表名前缀）
+   *  - entries 是 key → 已解析 ${VAR} 之后的条目文本
+   *  - "是否被本地改过"只比较我们那几个 key 的文本，绝不比较整个文件
+   *  - 这类 path 永不进 apply 的 unlink 分支：文件是成员在用的，我们只认领自己的条目
+   */
+  merge?: {
+    format: 'json' | 'toml';
+    pointer: string[];
+    entries: Record<string, string>;
+  };
 }
 
 /** 因管辖权或本地修改而保留不动的既有文件 */
@@ -162,6 +210,12 @@ export interface LedgerEntry {
   hash: string;
   resource: ResourceKey;
   deliveredAt: string;
+  /**
+   * 条目级合并（merge 投递）专用：我们写进那个共享文件的每个键 → 当时投递的文本哈希。
+   * 判"成员改过没有"只能逐键比，整文件哈希在这里毫无意义（文件里还有成员自己的条目）。
+   * 旧账本没有这个字段 = 空集，必须仍然算合法（否则回落空账本会把全部已投文件当别人的）。
+   */
+  managedKeys?: Record<string, string>;
 }
 
 export interface Ledger {
@@ -187,6 +241,12 @@ export interface AgentAdapter {
 
   /** rules → 三种模式之一（rulesdir / mdc / block） */
   planRules(rules: Resource[], home: string, env: NodeJS.ProcessEnv): PlannedWrite[];
+
+  /**
+   * MCP server → 该工具原生 MCP 配置里的受管条目（条目级合并，见 PlannedWrite.merge）。
+   * 可选：paths.ts 没给 mcpTarget 的工具不实现它，delivery 按"没有该能力"处理。
+   */
+  planMcp?(servers: Resource[], home: string, env: NodeJS.ProcessEnv): PlannedWrite[];
 
   /** 该绝对路径是否属于本适配器管辖（用于删除与 uninstall） */
   ownsPath(path: string, home: string, env: NodeJS.ProcessEnv): boolean;

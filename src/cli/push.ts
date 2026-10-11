@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { allResources } from '../core/types.js';import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 
 import { namespacesForRoles } from '../core/manifest.js';
@@ -110,7 +110,7 @@ function branchPrefixFor(resources: Array<{ kind: ResourceKind; name: string }>)
 }
 
 function repoHas(snapshot: Snapshot, resource: Resource): boolean {
-  const pool = resource.kind === 'skills' ? snapshot.skills : snapshot.rules;
+  const pool = snapshot.kinds[resource.kind];
   return pool.some((r) => r.name === resource.name && r.namespace === resource.namespace);
 }
 
@@ -215,10 +215,7 @@ async function collectPending(
 
   // 仓库已有的条目不再自动推（那是团队内容回流，会把根条目挪进 namespace）；
   // 要更新已入库的资源请用 --skill/--rule 显式指定路径。
-  const repoKeys = new Set([
-    ...snapshot.skills.map((r) => `skills:${r.name}`),
-    ...snapshot.rules.map((r) => `rules:${r.name}`),
-  ]);
+  const repoKeys = new Set(allResources(snapshot.kinds).map((r) => `${r.kind}:${r.name}`));
   const fresh = scanned.candidates.filter((c) => !repoKeys.has(candidateKey(c)));
   const skipped = scanned.candidates.length - fresh.length;
 

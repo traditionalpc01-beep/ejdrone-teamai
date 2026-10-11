@@ -1,5 +1,26 @@
 import { namespacesForRoles } from './manifest.js';
-import type { Config, Resolution, ResolveInput, Resource, ResourceKind, RolesManifest } from './types.js';
+import {
+  RESOURCE_KINDS,
+  emptyKinds,
+  type Config,
+  type KindSet,
+  type Resolution,
+  type ResolveInput,
+  type Resource,
+  type ResourceKind,
+  type RolesManifest,
+} from './types.js';
+
+/**
+ * 每类资源在团队仓库里的顶层目录名。
+ * 用表而不是 `kind === 'skills' ? … : …`：新增 kind 时漏了这一格会编译失败，
+ * 而三元表达式的 else 分支会把新 kind 静默当成 rules/ 目录处理。
+ */
+const KIND_ROOT: Record<ResourceKind, string> = {
+  skills: 'skills',
+  rules: 'rules',
+  mcp: 'mcp',
+};
 
 interface KindResult {
   items: Resource[];
@@ -8,7 +29,7 @@ interface KindResult {
 }
 
 function sourcePath(kind: ResourceKind, namespace: string, name: string): string {
-  const root = kind === 'skills' ? 'skills' : 'rules';
+  const root = KIND_ROOT[kind];
   return namespace === '' ? `${root}/${name}` : `${root}/${namespace}/${name}`;
 }
 
@@ -64,20 +85,22 @@ function sortResources(items: Resource[]): Resource[] {
 
 export function resolve(input: ResolveInput): Resolution {
   const active = new Set(input.activeNamespaces);
-  const skills = resolveKind('skills', input.skills, active);
-  const rules = resolveKind('rules', input.rules, active);
-
+  const kinds = emptyKinds();
+  const conflicts: string[] = [];
   const haltedKinds: ResourceKind[] = [];
-  if (skills.conflicted) haltedKinds.push('skills');
-  if (rules.conflicted) haltedKinds.push('rules');
 
-  return {
-    skills: skills.conflicted ? [] : sortResources(skills.items),
-    rules: rules.conflicted ? [] : sortResources(rules.items),
-    conflicts: [...skills.conflicts, ...rules.conflicts],
-    warnings: [],
-    haltedKinds,
-  };
+  for (const kind of RESOURCE_KINDS) {
+    const result = resolveKind(kind, input.kinds[kind] ?? [], active);
+    conflicts.push(...result.conflicts);
+    if (result.conflicted) {
+      haltedKinds.push(kind);
+      kinds[kind] = [];
+    } else {
+      kinds[kind] = sortResources(result.items);
+    }
+  }
+
+  return { kinds, conflicts, warnings: [], haltedKinds };
 }
 
 export function activeNamespaces(

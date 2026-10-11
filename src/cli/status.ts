@@ -1,5 +1,5 @@
 import { loadLedger } from '../core/ledger.js';
-import { ledgerPath } from '../state.js';
+import { allResources } from '../core/types.js';import { ledgerPath } from '../state.js';
 import type { CliContext } from './context.js';
 import { requireConfig } from './config.js';
 import { buildDelivery } from './delivery.js';
@@ -48,10 +48,7 @@ export async function statusCommand(ctx: CliContext): Promise<number> {
   const deliveredKeys = new Set(ledger.entries.map((entry) => entry.resource));
   const behind = [...repoKeys].filter((key) => !deliveredKeys.has(key));
 
-  const repoNames = new Set([
-    ...snapshot.skills.map((r) => `skills:${r.name}`),
-    ...snapshot.rules.map((r) => `rules:${r.name}`),
-  ]);
+  const repoNames = new Set(allResources(snapshot.kinds).map((r) => `${r.kind}:${r.name}`));
   const { candidates } = scanLocalAgents(ctx, config.agents);
   const toPush = candidates.filter((c) => !repoNames.has(`${c.kind}:${c.name}`));
 

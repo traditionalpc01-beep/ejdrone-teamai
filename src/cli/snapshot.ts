@@ -4,7 +4,7 @@ import { parseRolesManifest } from '../core/manifest.js';
 import { collectResources } from '../core/resources.js';
 import { defaultBranch, ensureClone, fetchReset } from '../git/repo.js';
 import { repoDir } from '../state.js';
-import type { Resource, RolesManifest } from '../core/types.js';
+import type { KindSet, RolesManifest } from '../core/types.js';
 import type { CliContext } from './context.js';
 
 export interface Snapshot {
@@ -15,8 +15,8 @@ export interface Snapshot {
   manifest: RolesManifest | null;
   /** 非空 → 必须全量停发（设计文档 §9） */
   manifestError: string | null;
-  skills: Resource[];
-  rules: Resource[];
+  /** 仓库里的全部资源，按 kind 分组（skills / rules / mcp） */
+  kinds: KindSet;
   warnings: string[];
 }
 
@@ -39,8 +39,7 @@ export async function openSnapshot(ctx: CliContext, repo: string): Promise<Snaps
         branch,
         manifest: parsed.manifest,
         manifestError: parsed.error ?? null,
-        skills: collected.skills,
-        rules: collected.rules,
+        kinds: collected.kinds,
         warnings: collected.warnings,
       },
     };
@@ -61,8 +60,7 @@ export function readExistingSnapshot(ctx: CliContext): Snapshot | null {
     branch: '',
     manifest: parsed.manifest,
     manifestError: parsed.error ?? null,
-    skills: collected.skills,
-    rules: collected.rules,
+    kinds: collected.kinds,
     warnings: collected.warnings,
   };
 }

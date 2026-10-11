@@ -50,7 +50,7 @@ export async function removeCommand(ctx: CliContext, rawKind: string | undefined
     return 1;
   }
 
-  const pool = kind === 'skills' ? snapshot.skills : snapshot.rules;
+  const pool = snapshot.kinds[kind];
   const found: Resource[] = [];
   const missing: string[] = [];
   for (const name of names) {

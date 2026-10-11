@@ -2,11 +2,11 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import type { Dirent } from 'node:fs';
-import type { Resource, RolesManifest } from './types.js';
+import { emptyKinds, type KindSet, type Resource, type RolesManifest } from './types.js';
 
 export interface CollectedResources {
-  skills: Resource[];
-  rules: Resource[];
+  /** 按 kind 分组；mcp 由 core/mcp.ts 解析列表文件后填进来 */
+  kinds: KindSet;
   warnings: string[];
 }
 
@@ -71,8 +71,7 @@ export function collectResources(
   checkoutRoot: string,
   manifest: RolesManifest | null,
 ): CollectedResources {
-  const skills: Resource[] = [];
-  const rules: Resource[] = [];
+  const kinds = emptyKinds();
   const warnings: string[] = [];
 
   const manifestNs = new Set<string>();
@@ -82,10 +81,12 @@ export function collectResources(
     }
   }
 
-  collectSkills(join(checkoutRoot, 'skills'), manifestNs, skills, warnings);
-  collectRules(join(checkoutRoot, 'rules'), manifestNs, rules, warnings);
+  collectSkills(join(checkoutRoot, 'skills'), manifestNs, kinds.skills, warnings);
+  collectRules(join(checkoutRoot, 'rules'), manifestNs, kinds.rules, warnings);
 
-  return { skills, rules, warnings };
+  // mcp/ 是列表文件（mcp/mcp.yaml），不是一个目录树，解析在 core/mcp.ts。
+  // 这里留空集合，由 snapshot 层把 mcp 条目并进 kinds.mcp。
+  return { kinds, warnings };
 }
 
 function collectSkills(

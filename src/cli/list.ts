@@ -1,5 +1,5 @@
 import { activeNamespaces } from '../core/plan.js';
-import type { ResourceKind } from '../core/types.js';
+import { allResources } from '../core/types.js';import type { ResourceKind } from '../core/types.js';
 import type { CliContext } from './context.js';
 import { requireConfig } from './config.js';
 import { selectedAdapters } from './delivery.js';
@@ -78,10 +78,7 @@ export async function listCommand(ctx: CliContext, kind: string | undefined, opt
   const { notes } = selectedAdapters(ctx, config);
   for (const note of notes) ctx.out(`提示：${note}`);
 
-  const rows = [
-    ...(wanted === null || wanted === 'skills' ? snapshot.skills : []),
-    ...(wanted === null || wanted === 'rules' ? snapshot.rules : []),
-  ].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
+  const rows = (wanted === null ? allResources(snapshot.kinds) : snapshot.kinds[wanted]).sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
 
   ctx.out(`团队仓库：${rows.length} 条（分支 ${snapshot.branch}）`);
   for (const row of rows) {

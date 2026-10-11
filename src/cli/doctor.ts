@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 
+import { allResources } from '../core/types.js';
 import { registry } from '../agents/index.js';
 import { hookTarget, TOOL_PATHS } from '../agents/paths.js';
 import { hasHook, installedHookCommand } from '../hooks.js';
@@ -99,7 +100,7 @@ export async function doctorCommand(ctx: CliContext, options: DoctorOptions): Pr
       message: `解析成功，角色：${snapshot.manifest.roles.map((r) => r.id).join(', ') || '（空）'}`,
     });
     const declared = new Set(snapshot.manifest.roles.flatMap((r) => r.namespaces));
-    const orphans = [...new Set([...snapshot.skills, ...snapshot.rules].map((r) => r.namespace))].filter(
+    const orphans = [...new Set(allResources(snapshot.kinds).map((r) => r.namespace))].filter(
       (ns) => ns !== '' && !declared.has(ns),
     );
     for (const ns of orphans) note(`提示：namespace「${ns}」有条目但没有任何角色引用它，pull 不会下发`);

@@ -1,7 +1,15 @@
 import { registry } from '../agents/index.js';
 import { rulesRoot, skillsRoot } from '../agents/paths.js';
 import { activeNamespaces, resolve } from '../core/plan.js';
-import { type AgentAdapter, type Config, type Ledger, type PlannedWrite, type Resource, type ResourceKey } from '../core/types.js';
+import {
+  type AgentAdapter,
+  type Config,
+  type KindSet,
+  type Ledger,
+  type PlannedWrite,
+  type ResourceKey,
+  type ResourceKind,
+} from '../core/types.js';
 import type { CliContext } from './context.js';
 import type { Snapshot } from './snapshot.js';
 
@@ -11,11 +19,13 @@ export interface Delivery {
   activeResources: ResourceKey[];
   isManaged(path: string): boolean;
   conflicts: string[];
+  /** 因冲突被整体停发的 kind —— 消费方据此跳过该 kind，别把"停发"当成"清空" */
+  haltedKinds: ResourceKind[];
   /** 人类可读的过程告警（manifest 角色、缺 SKILL.md、未知工具等） */
   notes: string[];
   adapters: AgentAdapter[];
-  skills: Resource[];
-  rules: Resource[];
+  /** 裁决后的候选集，按 kind 分组 */
+  kinds: KindSet;
 }
 
 export function selectedAdapters(ctx: CliContext, config: Config): { adapters: AgentAdapter[]; notes: string[] } {
@@ -51,8 +61,7 @@ export function buildDelivery(ctx: CliContext, config: Config, snapshot: Snapsho
   notes.push(...warnings);
 
   const resolution = resolve({
-    skills: snapshot.skills,
-    rules: snapshot.rules,
+    kinds: snapshot.kinds,
     activeNamespaces: namespaces,
   });
   notes.push(...resolution.warnings);
@@ -65,8 +74,12 @@ export function buildDelivery(ctx: CliContext, config: Config, snapshot: Snapsho
   for (const adapter of adapters) {
     // 停发 ≠ 清空：block 模式适配器拿到空数组会写出一条"清空区块"的投递，
     // 那会把已装的 Codex / DSH 团队区块抹掉。冲突时必须整个跳过。
-    if (!halted.has('skills')) writes.push(...adapter.planSkills(resolution.skills, ctx.home, ctx.env));
-    if (!halted.has('rules')) writes.push(...adapter.planRules(resolution.rules, ctx.home, ctx.env));
+    if (!halted.has('skills')) writes.push(...adapter.planSkills(resolution.kinds.skills, ctx.home, ctx.env));
+    if (!halted.has('rules')) writes.push(...adapter.planRules(resolution.kinds.rules, ctx.home, ctx.env));
+    // MCP 能力是可选项：表里没给 mcpTarget 的工具不实现 planMcp，跳过即可。
+    if (!halted.has('mcp') && adapter.planMcp) {
+      writes.push(...adapter.planMcp(resolution.kinds.mcp, ctx.home, ctx.env));
+    }
   }
 
   const isManaged = (path: string): boolean =>
@@ -77,25 +90,25 @@ export function buildDelivery(ctx: CliContext, config: Config, snapshot: Snapsho
     activeResources: [...new Set(writes.map((w) => w.resource))],
     isManaged,
     conflicts: resolution.conflicts,
+    haltedKinds: resolution.haltedKinds,
     notes,
     adapters,
-    skills: resolution.skills,
-    rules: resolution.rules,
+    kinds: resolution.kinds,
   };
 }
 
 /**
  * 冲突只停该 kind，但停发不等于删除：把该 kind 在 ledger 里的既有资源也标成 active，
  * 否则 applyPlan 会把全体成员的已装内容清空（名称冲突是团队写错目录，不是删除指令）。
+ * 用 haltedKinds 而不是从冲突文案里 split 出 kind：文案给人看，随时会变，
+ * 而漏掉一个新 kind 的后果是"停发"被当成"删除"，全员该类型内容被清空。
  */
 export function activeResourcesWithConflictHold(
   delivery: Delivery,
   ledger: Ledger,
 ): ResourceKey[] {
   const active = new Set<ResourceKey>(delivery.activeResources);
-  for (const conflict of delivery.conflicts) {
-    const kind = conflict.split(':', 1)[0];
-    if (kind !== 'skills' && kind !== 'rules') continue;
+  for (const kind of delivery.haltedKinds) {
     for (const entry of ledger.entries) {
       if (entry.resource.startsWith(`${kind}:`)) active.add(entry.resource);
     }
