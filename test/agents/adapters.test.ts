@@ -9,11 +9,11 @@ import { HOOK_COMMAND_MARKER } from '../../src/hooks.js';
 import { BLOCK_END, BLOCK_START, BLOCK_RESOURCE_KEY } from '../../src/agents/block.js';
 import { AGENT_IDS, adapters, registry } from '../../src/agents/index.js';
 import { claudeAdapter } from '../../src/agents/claude.js';
-import { qoderAdapter } from '../../src/agents/qoder.js';
+import { qoderAdapter } from '../../src/agents/qoder-cn.js';
 import { cursorAdapter } from '../../src/agents/cursor.js';
 import { codexAdapter } from '../../src/agents/codex.js';
 import { dshAdapter } from '../../src/agents/dsh.js';
-import { rulesBlockPath, skillsRoot, toolRoot } from '../../src/agents/paths.js';
+import { rulesBlockPath, skillsRoot, TOOL_PATHS, toolRoot } from '../../src/agents/paths.js';
 
 const HOME_ENV: NodeJS.ProcessEnv = {}; // 显式空 env：绝不读真实 process.env.HOME
 
@@ -75,23 +75,26 @@ function countOccurrences(haystack: string, needle: string): number {
 }
 
 describe('registry / index', () => {
-  it('exposes 5 adapters in paths.ts order', () => {
-    expect(adapters.map((a) => a.id)).toEqual(['claude', 'qoder-cn', 'cursor', 'codex', 'dsh']);
-    expect(AGENT_IDS).toEqual(['claude', 'qoder-cn', 'cursor', 'codex', 'dsh']);
+  const tableIds = Object.keys(TOOL_PATHS);
+  const registered = adapters.map((a) => a.id);
+
+  it('每个已注册适配器都在 paths.ts 里有表项，且注册顺序与表顺序一致', () => {
+    for (const id of registered) expect(tableIds).toContain(id);
+    expect(registered).toEqual(tableIds.filter((id) => registered.includes(id)));
+  });
+
+  it('AGENT_IDS 只包含已注册的工具（paths.ts 允许有还没写适配器的表项）', () => {
+    expect(AGENT_IDS).toEqual(registered);
   });
 
   it('registry byId unknown id returns undefined (no throw)', () => {
     const reg = registry();
     expect(reg.byId('nope')).toBeUndefined();
     expect(reg.byId('claude')?.label).toBe('Claude Code');
-    expect(reg.all().map((a) => a.id)).toEqual(AGENCY_ORDER());
-    expect(reg.ids()).toEqual(['claude', 'qoder-cn', 'cursor', 'codex', 'dsh']);
+    expect(reg.all().map((a) => a.id)).toEqual(registered);
+    expect(reg.ids()).toEqual(registered);
   });
 });
-
-function AGENCY_ORDER(): string[] {
-  return adapters.map((a) => a.id);
-}
 
 describe('detect', () => {
   let home: string;

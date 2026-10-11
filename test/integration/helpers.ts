@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { TOOL_PATHS } from '../../src/agents/paths.js';
 import { runCli, type CliContextInput } from '../../src/cli.js';
 
 /**
@@ -198,16 +199,15 @@ export function seedTeamRepo(h: Harness): void {
   h.commitSeed('seed team assets');
 }
 
-/** 伪造 HOME 下要"探测到"这些工具，就得先有它们的根目录 */
+/**
+ * 伪造 HOME 下要"探测到"这些工具，就得先有它们的根目录。
+ * 根目录名一律取自 paths.ts 的表 —— 硬编码表会在新增工具时静默回落成 `.<id>`，
+ * 于是测试"装了"而适配器看的是另一个目录。
+ */
 export function installTools(member: Member, ids: string[]): void {
-  const rootOf: Record<string, string> = {
-    claude: '.claude',
-    'qoder-cn': '.qoder-cn',
-    cursor: '.cursor',
-    codex: '.codex',
-    dsh: '.dsh',
-  };
   for (const id of ids) {
-    mkdirSync(member.path(rootOf[id] ?? `.${id}`), { recursive: true });
+    const spec = TOOL_PATHS[id];
+    if (!spec) throw new Error(`installTools: paths.ts 里没有工具 ${id}`);
+    mkdirSync(member.path(spec.rootRel), { recursive: true });
   }
 }
