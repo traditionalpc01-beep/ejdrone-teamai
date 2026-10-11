@@ -166,15 +166,27 @@ export interface PlannedWrite {
 }
 ```
 
-合并规则（写进 `core/apply.ts` 注释，逐条有测试）：
+合并规则（实现落在 `core/merge.ts` 纯函数 + `core/apply.ts` 接入，逐条有测试）：
 
-1. 我方条目集合 = `merge.entries` 的 keys；`LedgerEntry` 新增 `managedKeys?: string[]` 记录上次投递的 keys。
-2. 本次有、上次也有：当前文件里该条目与**上次投递文本**逐字节一致 → 覆写；不一致 → 用户改过 → keep 点名，不动。
+1. 我方条目集合 = `merge.entries` 的 keys；`LedgerEntry` 新增 `managedKeys?: Record<string,string>`
+   （条目 key → 当时投递文本的 `sha256:`）。执行时从计划的初稿 `string[]` 改成这个形状：
+   只记 keys 就无法实现规则 2（没有"上次投递的那份文本"可比）。
+2. 本次有、上次也有：文件里该条目与上次投递相符 → 覆写；不相符 → 用户改过 → keep 点名，不动。
+   **相符的判定是规范化比较**：JSON 键排序后比（格式化/键序抖动不算"成员改过"），TOML 按块原文逐字节比。
 3. 本次没有、上次有：同上判定，未改过 → 删除该条目；改过 → keep。
-4. 文件里存在、两次投递都没有的 key → 用户的，永不触碰。
-5. 文件不存在 → 新建（权限 0600）；文件存在但解析失败 → 该工具 mcp 投递整体跳过 + FAIL 级 warning，不改文件。
+4. 文件里存在、两次投递都没有的 key → 用户的，永不触碰、永不重排（TOML 侧连注释与表序都逐字节不变）。
+5. 文件不存在 → 新建（0600）；文件存在但解析失败或形状认不出 → 该工具本次 mcp 投递整体跳过并 FAIL 级点名，**不改文件**。
+   TOML 只认 `[mcp_servers.<name>]` + 其子表这种受控形态；遇到 `[[`、内联表 `mcp_servers = {…}`、引号/括号不平衡一律判异形跳过
+   —— 宁可不投，也不要在成员手写的 TOML 里猜。
 6. 任何写出前先把整个新文件内容算好再落盘（沿用「先算完整 plan」原则）；含已解析 `${VAR}` 值的文件收紧 0600，
-   已解析值**永不打印**到 stdout/stderr/log。
+   已解析值**永不打印**到 stdout/stderr/log。渲染阶段抛错时 `writeFileSync` 一次都不能被调用。
+7. 执行中补的三条（计划初稿没覆盖）：
+   - **恒发一条 merge write**：工具有 `mcpTarget` 且 mcp 未停发时，`planMcp` 返回恰好一条 write，`entries` 可以为空。
+     否则"最后一个 server 停投"永远清不掉，成员文件里留下没人认领的孤儿条目。
+   - **合成 resource key** `mcp:<tool>-merge`（照 block 的 `rules:team-rules-block` 惯例）并计入 `activeResources`，
+     这样 1.0 的"冲突停发 ≠ 清空"不变量对 mcp 自动成立。
+   - **merge 落点与 hookFile 是同一个文件**（Qoder CN 的 `settings.json`）：两条写路径各自只动自己的键，
+     `hooks` 与 `mcpServers` 互不破坏，权限也照原文件保留。
 
 ### 3.4 ToolPathSpec 扩展（`src/agents/paths.ts`）
 
@@ -407,6 +419,20 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 | MCP 项目级落点 | 支持（含 gitExclude、Codex trust） | 不支持 | 我们无 project scope |
 | Windows hook | 逐工具解析各自 shell（WorkBuddy 用自带 PortableGit） | 统一 Git Bash 绝对路径，没有就 installed:false；workbuddy 是否必须走其自带 PortableGit `sh.exe` 列入 M10 真机探测清单 | 统一路径覆盖面最大；workbuddy 的特例先探测再决定要不要开口子 |
 | learnings 提示 | Stop hook 摩擦评分自动提示 | 主线 = 内置 skill 教 agent 主动建议；自动提示为 stretch | 见 §2 不做表 |
+
+### 执行期追加（M5/M6 落地时定下，后续里程碑照此，不要"顺手改回" teamai 的做法）
+
+| 项 | teamai 做法 | 本项目做法 | 理由 |
+|---|---|---|---|
+| `mcp.yaml` 超时字段 | `timeout` | 只认 `timeout`，内部字段 `timeoutMs` | 两种拼法都收会让"写错的也生效"，文档教不出唯一写法 |
+| MCP 文件里的同名条目 | 有 ownership 记录 + 位置证据的复杂认领 | 账本没有、文件里已有 → `foreign-entry` 跳过不覆盖（`--force` 才动） | 我们没有那套 ownership 记录，猜领别人的条目比不投更糟 |
+| MCP 落点表结构 | 独立 reconcile 模块（164KB） | `paths.ts` 每行一个 `mcpTarget{format,file,homeFile,pointer}` | 一张表可读；`homeFile` 表达 Claude 的 `~/.claude.json` 不在 `~/.claude/` 下 |
+| CodeBuddy MCP | 三个候选文件按"读哪个看先后"搬迁 | 只写首选 `~/.codebuddy/.mcp.json` | 搬迁逻辑是为版本迁移准备的，我们没那个历史包袱；该成员若已有别的文件，doctor 会点名 |
+| Codex MCP | 写入后调 `codex app-server` 自动信任 | 不写 trust，pull 末尾提示一次"首次在 codex 内确认" | 自动信任属 project scope 的事，我们只有 user scope |
+| `[[` / 内联表 / 不平衡引号的 TOML | 完整 TOML 解析 | 判异形 → 该工具整体跳过 + FAIL 点名 | 宁可不投，也不要在成员手写 TOML 里猜；无 TOML 依赖 |
+| JSON 合并 | parse→改→重序列化 | 同样 parse→只动 pointer 那一层→按原缩进/结尾换行重序列化 | 整文件重排不可避免，所以"成员改过没有"只比我方条目的规范化文本 |
+| detect | 各工具自己的复杂判定 | 仍然只看根目录存在 | 16 工具后误报面变大，但 `init` 由成员自己勾，不发明新判据 |
+| 卸载留下的空目录 | 按 ownership 记录清理 | 只报告不删 | 分不清是谁建的（`~/.trae/rules` 是原生目录），删了就是动成员目录 |
 
 ---
 
