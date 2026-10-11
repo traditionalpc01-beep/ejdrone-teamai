@@ -26,15 +26,26 @@ function rulesCell(spec: ToolPathSpec): string {
   }
 }
 
+function mcpCell(spec: ToolPathSpec): string {
+  const target = spec.mcpTarget;
+  if (!target) return '不下发（该工具没有用户级 MCP 落点）';
+  // Claude 的 `~/.claude.json` 不在 `~/.claude/` 下，用 homeFile 表达（表里唯一的例外）
+  if (target.homeFile) return `~/${target.homeFile} 里的 ${target.pointer.join('.')}`;
+  return `~/${spec.rootRel}/${target.file} 里的 ${target.pointer.join('.')}`;
+}
+
 function rootCell(spec: ToolPathSpec): string {
   return spec.rootEnvVar ? `${spec.label}<br>（或 \$${spec.rootEnvVar}）` : spec.label;
 }
 
 function deliveryMatrix(): string {
   const rows = Object.values(TOOL_PATHS)
-    .map((spec) => `| ${rootCell(spec)} | \`${skillsCell(spec)}\` | \`${rulesCell(spec)}\` |`)
+    .map(
+      (spec) =>
+        `| ${rootCell(spec)} | \`${skillsCell(spec)}\` | \`${rulesCell(spec)}\` | \`${mcpCell(spec)}\` |`,
+    )
     .join('\n');
-  return `| 工具 | 技能 | 规范 |\n|---|---|---|\n${rows}`;
+  return `| 工具 | 技能 | 规范 | MCP |\n|---|---|---|---|\n${rows}`;
 }
 
 export function teamReadme(repo: string, branch: string): string {
@@ -81,6 +92,8 @@ skills/<name>/SKILL.md             全员共享的技能
 skills/<ns>/<name>/SKILL.md        只给某角色（namespace = <ns>）的技能
 rules/<name>.md                    全员共享的规范
 rules/<ns>/<name>.md               只给某角色的规范
+mcp/mcp.yaml                       全员共享的 MCP server 清单
+mcp/<ns>/mcp.yaml                  只给某角色的 MCP server 清单
 \`\`\`
 
 **这条规矩最重要**：全员共享的放根目录，只给某个角色的才放 namespace。
@@ -99,7 +112,34 @@ ejdrone push --skill ~/.claude/skills/my-skill
 \`\`\`
 
 同一条资源重复 push 会就地更新那条未合并的分支，不会开重复的 MR。
-删除走 \`ejdrone remove <skills|rules> <名字>\`，同样是先评审合入、再由 \`pull\` 从各人机器上移除。
+删除走 \`ejdrone remove <skills|rules|mcp> <名字>\`，同样是先评审合入、再由 \`pull\` 从各人机器上移除。
+
+## MCP 服务：怎么写、怎么提交
+
+\`mcp/mcp.yaml\`（全员）与 \`mcp/<ns>/mcp.yaml\`（只给某角色）各是一份 server 清单：
+
+\`\`\`yaml
+servers:
+  - name: shared-formatter        # 小写字母、数字、-、_
+    description: 统一格式化
+    transport: stdio              # stdio | http | sse
+    command: npx                  # stdio 用
+    args: ['-y', '@acme/formatter-mcp']
+  - name: be-metrics
+    transport: http               # http / sse 用 url
+    url: https://metrics.example.com/mcp
+    headers:
+      Authorization: Bearer \${BE_METRICS_TOKEN}   # 凭据写成 \${VAR}
+\`\`\`
+
+- **密钥不要写进仓库**。凭据一律写成 \`\${VAR}\`，\`pull\` 时从每个人自己的环境变量里取值；
+  谁缺这个变量，谁的这条 server 就跳过并在 \`ejdrone doctor\` / \`pull\` 里点名（值不会被打印）。
+- 在自己工具里调好一条 server 后，可以直接采进来：\`ejdrone push --mcp <名字>\`。
+  它只读你选定工具的用户级 MCP 配置，并把看着像凭据的值自动改写成 \`\${VAR}\` 再入库。
+  \`ejdrone list mcp --source local\` 能先看到各工具里都有哪几条（只列名字）。
+- 投递是**条目级合并**：只动清单里那几条，你自己配的 server 一条都不会被碰；
+  我们投的那条如果你改过，\`pull\` 保留你的版本并点名。
+- 只在个别工具好用的 server 可以用 \`tools: [claude, qoder-cn]\` 限定下发范围。
 
 ## 内容会落到我机器的哪里
 

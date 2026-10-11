@@ -10,11 +10,12 @@ import type { CliContextInput } from './cli/context.js';
 import { collect, createContext, reportError, type CliContext } from './cli/context.js';
 import { doctorCommand, type DoctorOptions } from './cli/doctor.js';
 import { initCommand, type InitOptions } from './cli/init.js';
+import { kindHelp } from './cli/kinds.js';
 import { listCommand, type ListOptions } from './cli/list.js';
 import { pullCommand, type PullOptions } from './cli/pull.js';
 import { pushCommand, type PushOptions } from './cli/push.js';
 import { readmeCommand } from './cli/readme.js';
-import { removeCommand } from './cli/remove.js';
+import { removeCommand, type RemoveOptions } from './cli/remove.js';
 import { rolesAdd, rolesList, rolesRemove, rolesSet, type RolesAddOptions, type RolesSetOptions } from './cli/roles.js';
 import { statusCommand } from './cli/status.js';
 import { uninstallCommand, type UninstallOptions } from './cli/uninstall.js';
@@ -83,10 +84,16 @@ export async function runCli(argv: string[], input: CliContextInput = {}): Promi
 
   program
     .command('push')
-    .description('把本地 skill/rule 推到团队仓库（自动分支 + MR）')
+    .description('把本地 skill/rule/MCP server 推到团队仓库（自动分支 + MR）')
     .option('--skill <path>', '要推送的 skill 目录或 SKILL.md，可重复', collect)
     .option('--rule <path>', '要推送的 rule 文件，可重复', collect)
-    .option('--all', '推送选定工具目录里所有本地候选')
+    .option(
+      '--mcp <name>',
+      '反向采集：从选定工具的用户级 MCP 落点里找这个名字的 server 写进 mcp/*.yaml，可重复',
+      collect,
+    )
+    .option('--agent <id>', '把 --mcp 的采集范围缩到这一个工具 id（同名不同内容时用）')
+    .option('--all', '推送选定工具目录里所有本地候选（只含 skills/rules，不含 MCP）')
     .option('--role <id>', '按角色 id 推送（经 manifest 映射到它的 namespace；缺省用本地主角色）')
     .option('--ns <namespace>', '显式指定目标 namespace 目录（角色订阅多个 namespace 时用）')
     .action(guard(async (options: PushOptions) => pushCommand(ctx, options)));
@@ -99,7 +106,7 @@ export async function runCli(argv: string[], input: CliContextInput = {}): Promi
   program
     .command('list')
     .description('列出资源（默认团队仓库）')
-    .argument('[kind]', 'skills | rules')
+    .argument('[kind]', kindHelp())
     .option('--source <source>', 'repo | local | all')
     .action(guard(async (kind: string | undefined, options: ListOptions) => listCommand(ctx, kind, options)));
 
@@ -130,9 +137,19 @@ export async function runCli(argv: string[], input: CliContextInput = {}): Promi
   program
     .command('remove')
     .description('从团队仓库删除资源（走 MR；不动你本地副本）')
-    .argument('<kind>', 'skills | rules')
+    .argument('<kind>', kindHelp())
     .argument('<names...>', '资源名，可多个')
-    .action(guard(async (kind: string, names: string[]) => removeCommand(ctx, kind, names)));
+    .option('--role <id>', 'mcp：同名条目在根与多个 namespace 时，按角色映射到 namespace 表态')
+    .option('--ns <namespace>', 'mcp：显式指定从哪个 namespace 的文件里删')
+    .action(
+      guard(
+        async (
+          kind: string,
+          names: string[],
+          options: RemoveOptions,
+        ) => removeCommand(ctx, kind, names, options),
+      ),
+    );
 
   program
     .command('readme')

@@ -1,16 +1,18 @@
 import { existsSync } from 'node:fs';
 
-import { allResources } from '../core/types.js';
+import { allResources, mcpPayload } from '../core/types.js';
 import { registry } from '../agents/index.js';
-import { hookTarget, TOOL_PATHS } from '../agents/paths.js';
+import { hookTarget, mcpTargetPath, TOOL_PATHS } from '../agents/paths.js';
+import { resolveMcpResources } from '../core/mcp.js';
+import { activeNamespaces, resolve } from '../core/plan.js';
 import { hasHook, installedHookCommand } from '../hooks.js';
 import { currentCliEntry, parseHookPaths } from './constants.js';
 import { loadLedger } from '../core/ledger.js';
-import type { Config } from '../core/types.js';
+import type { Config, Ledger } from '../core/types.js';
 import { configPath, ledgerPath } from '../state.js';
 import type { CliContext } from './context.js';
 import { requireConfig } from './config.js';
-import { auditLedger } from './ledgercheck.js';
+import { auditLedger, type LedgerAudit } from './ledgercheck.js';
 import { readExistingSnapshot, openSnapshot, type Snapshot } from './snapshot.js';
 
 export type CheckStatus = 'PASS' | 'WARN' | 'FAIL';
@@ -32,6 +34,127 @@ function probeUnverified(id: string): boolean {
   const probe = TOOL_PATHS[id]?.probe;
   if (!probe) return false;
   return /未核对|待真机|PROBE/.test(probe);
+}
+
+/**
+ * mcp 四项检查。id 前缀统一 `mcp:`，`--json` 里逐 id 可取（CI 与真机试验都靠它们销记）。
+ *
+ * 分工与退出码：只有 `mcp:parse` 是 FAIL（文件级解析失败 = 全员停发，必须挡住），
+ * 其余三条都是成员自己能解决的状态，一律 WARN，不参与 `fails>0 ? 1 : 0` 的判据。
+ */
+function mcpParseCheck(snapshot: Snapshot | null): Check {
+  if (snapshot === null) {
+    return {
+      id: 'mcp:parse',
+      status: 'WARN',
+      message: '没有可用快照，未检查 mcp 列表文件',
+      hint: '联网后重跑 ejdrone doctor',
+    };
+  }
+  if (snapshot.mcpFileError !== null) {
+    return {
+      id: 'mcp:parse',
+      status: 'FAIL',
+      message: `mcp 列表文件解析失败，本次 mcp 已停发、已装内容不动：${snapshot.mcpFileError}`,
+      hint: `修好 ${snapshot.dir}/mcp/mcp.yaml（顶层必须是带 servers: 列表的映射）后 ejdrone pull`,
+    };
+  }
+  const count = snapshot.kinds.mcp.length;
+  return {
+    id: 'mcp:parse',
+    status: 'PASS',
+    message:
+      count === 0
+        ? '仓库里没有 mcp/ 条目（mcp/mcp.yaml 缺席 = 该 kind 空集，不是错误）'
+        : `mcp 列表文件可解析，${count} 条 server`,
+  };
+}
+
+function mcpVarCheck(ctx: CliContext, config: Config | null, snapshot: Snapshot | null): Check {
+  const idle = (message: string, hint?: string): Check => ({ id: 'mcp:var', status: 'WARN', message, hint });
+  if (!config || !snapshot) return idle('没有 config 或快照，未检查 MCP 环境变量', 'ejdrone init <repo-url>');
+  if (snapshot.mcpFileError !== null) {
+    return idle('mcp 已停发（见 mcp:parse），未检查环境变量');
+  }
+  const { namespaces } = activeNamespaces(config, snapshot.manifest);
+  const candidates = resolve({ kinds: snapshot.kinds, activeNamespaces: namespaces }).kinds.mcp;
+  // 只看真的会投给本机的那部分：`tools:` 把 server 限定到没勾的工具时，缺变量不该来烦这个成员
+  const capable = new Set(config.agents.filter((id) => mcpTargetPath(id, ctx.home, ctx.env) !== null));
+  const applicable = candidates.filter((r) => {
+    const tools = mcpPayload(r).tools;
+    return !tools || tools.some((t) => capable.has(t));
+  });
+  const { skipped } = resolveMcpResources(applicable, ctx.env);
+  if (skipped.length === 0) {
+    return {
+      id: 'mcp:var',
+      status: 'PASS',
+      message:
+        applicable.length === 0
+          ? '没有需要解析环境变量的 MCP 条目'
+          : `${applicable.length} 条 server 的 \${VAR} 均能取到值`,
+    };
+  }
+  return {
+    id: 'mcp:var',
+    status: 'WARN',
+    message: `${skipped.length} 条 server 的环境变量取不到值，pull 会整条跳过并点名：${skipped
+      .map((s) => `"${s.name}" 缺 ${s.missing.map((v) => `\${${v}}`).join('、')}`)
+      .join('；')}`,
+    // 只出变量名与设置方法，值永不出现（设计文档 §10 第 4 条）
+    hint: skipped.flatMap((s) => s.missing.map((v) => `export ${v}='<该凭据的值>'（server "${s.name}"）`)).join('\n'),
+  };
+}
+
+function mcpManagedCheck(audited: { ledger: Ledger; audit: LedgerAudit } | null, ledgerExists: boolean): Check {
+  if (!ledgerExists) {
+    return { id: 'mcp:managed', status: 'PASS', message: '尚无投递记账，没有受管条目可核对' };
+  }
+  if (audited === null) {
+    return { id: 'mcp:managed', status: 'WARN', message: '账本不可读，未核对受管的 MCP 条目（见 ledger 项）' };
+  }
+  const managed = audited.ledger.entries.filter((e) => Object.keys(e.managedKeys ?? {}).length > 0);
+  if (managed.length === 0) {
+    return { id: 'mcp:managed', status: 'PASS', message: '账本里没有受管的 MCP 条目（本机还没投过）' };
+  }
+  const bad = [
+    ...audited.audit.modified.filter((e) => e.resource.startsWith('mcp:')),
+    ...audited.audit.missing.filter((e) => e.resource.startsWith('mcp:')),
+  ];
+  if (bad.length === 0) {
+    return {
+      id: 'mcp:managed',
+      status: 'PASS',
+      message: `${managed.length} 个落点文件里的受管条目与账本一致`,
+    };
+  }
+  return {
+    id: 'mcp:managed',
+    status: 'WARN',
+    message: `${managed.length} 个落点文件里有 ${bad.length} 个的受管条目与账本不一致（你改过或已删掉）`,
+    hint: `${bad.map((e) => `${e.path}（${Object.keys(e.managedKeys ?? {}).join('、')}）`).join('\n')}\n这些条目 pull 不会覆盖，只在点名里列出；想让团队的版本重新生效，就把那几条改回原样或直接删掉。`,
+  };
+}
+
+function mcpTargetCheck(ctx: CliContext, config: Config | null): Check {
+  if (!config) {
+    return { id: 'mcp:target', status: 'WARN', message: '没有 config，未检查 MCP 落点', hint: 'ejdrone init <repo-url>' };
+  }
+  if (config.agents.length === 0) {
+    return { id: 'mcp:target', status: 'WARN', message: '还没选定工具，无 MCP 落点可查', hint: 'ejdrone init --agent <ids>' };
+  }
+  const missing = config.agents.filter(
+    (id) => TOOL_PATHS[id] !== undefined && mcpTargetPath(id, ctx.home, ctx.env) === null,
+  );
+  if (missing.length === 0) {
+    return { id: 'mcp:target', status: 'PASS', message: `选定的 ${config.agents.length} 个工具都有用户级 MCP 落点` };
+  }
+  return {
+    id: 'mcp:target',
+    status: 'WARN',
+    message: `选定工具有 ${missing.length} 个没有用户级 MCP 落点，因此收不到团队的 mcp 条目：${missing.join('、')}`,
+    hint: '这些工具的 MCP 配置请手动维护（只有项目级落点的尤其如此）；团队侧可在条目里用 tools: 把它们排除，免得别人以为全员生效',
+  };
 }
 
 export async function doctorCommand(ctx: CliContext, options: DoctorOptions): Promise<number> {
@@ -191,6 +314,8 @@ export async function doctorCommand(ctx: CliContext, options: DoctorOptions): Pr
   }
 
   const ledgerFile = ledgerPath(ctx.env);
+  /** mcp:managed 复用同一份账本核对结果，不再读第二遍磁盘 */
+  let audited: { ledger: Ledger; audit: LedgerAudit } | null = null;
   if (!existsSync(ledgerFile)) {
     add({ id: 'ledger', status: 'PASS', message: '尚无投递记录（首次 pull 后会生成）' });
   } else {
@@ -204,6 +329,7 @@ export async function doctorCommand(ctx: CliContext, options: DoctorOptions): Pr
       });
     } else {
       const audit = auditLedger(ledger);
+      audited = { ledger, audit };
       const details = [
         ...audit.modified.map((e) => `本地改过：${e.path}`),
         ...audit.missing.map((e) => `文件已不在：${e.path}`),
@@ -219,6 +345,14 @@ export async function doctorCommand(ctx: CliContext, options: DoctorOptions): Pr
       });
     }
   }
+
+  // ------------------------------------------------------------- M6：mcp 四项
+  // 退出码规则不变（fails>0 ? 1 : 0），--json 里这四项照常出现：只有"文件解析失败"配得上 FAIL，
+  // 其余三条都是"成员能自己解决"的现场（缺变量、改过条目、工具没落点）。
+  add(mcpParseCheck(snapshot));
+  add(mcpVarCheck(ctx, config, snapshot));
+  add(mcpManagedCheck(audited, existsSync(ledgerFile)));
+  add(mcpTargetCheck(ctx, config));
 
   // 未核对落点只报"你真的选定了"的工具：16 工具后若仍列全表，
   // 每人 init 时勾了 2-3 个也会被十几条无关 WARN 刷屏，WARN 就此没人看。

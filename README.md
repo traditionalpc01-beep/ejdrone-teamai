@@ -125,20 +125,36 @@ servers:
 
 哪些工具有用户级 MCP 落点，见下面的投递矩阵；没有落点的工具收不到 MCP，也不会被凭空造出配置文件。
 
+自己在工具里调好一条 server 之后，可以直接把它采进仓库，不用手抄：
+
+```bash
+ejdrone list mcp --source local        # 先看各工具的用户级 MCP 配置里有哪几条（只列名字，不列值）
+ejdrone push --mcp local-formatter     # 反向采集 → 自动分支 + MR
+```
+
+- 采集只读 JSON 形态的落点。Codex 的 `config.toml` 不做反向解析（投递时只做受控的表块拼接，
+  故意没写完整解析器），想让那条入库就照上面的形状手写进 `mcp/mcp.yaml`。
+- 采到的值里**看着像凭据的会自动改写成 `${VAR}` 再入库**（键名以 `TOKEN`/`KEY`/`SECRET`/`PASSWORD`
+  结尾、`Authorization` 这类按定义就是凭据的 header、以及形状像 token 的取值）。命令会点名改了哪几条、
+  用了什么变量名、怎么 `export`；**值本身不会出现在任何输出里**。没法安全改写的（凭据写在命令行参数或 URL
+  查询串里 —— 换成 `${VAR}` 会连命令和地址一起吞掉）就拒绝入库，让你手写，绝不静默提交明文。
+- `remove mcp <名字>` 同样只删仓库（走 MR），你本机那份由合入后的下一次 `pull` 撤掉；
+  根与 namespace 两处同名时会拒绝并列出两个文件，要你带 `--ns`/`--role` 表态。
+
 ## 命令
 
 | 命令 | 作用 |
 |---|---|
 | `init <repo>` | 选定工具与角色、装 hook、首次 pull |
 | `pull [--force] [--silent]` | 同步团队仓库并投递。`--force` 覆盖本地改过的整文件投递（团队区块只动区块） |
-| `push [--skill p] [--rule p] [--all] [--role id] [--ns ns]` | 推资源，自动分支 + MR |
-| `status` | 待推送 / 落后 / 本地改动 |
-| `list [skills\|rules] [--source repo\|local\|all]` | 列资源及其 namespace 与根条目归属 |
+| `push [--skill p] [--rule p] [--mcp name] [--agent id] [--all] [--role id] [--ns ns]` | 推资源，自动分支 + MR。`--mcp` 从本机 MCP 配置反向采集；`--all` 只含 skills/rules |
+| `status` | 待推送 / 落后 / 本地改动（含 MCP） |
+| `list [skills\|rules\|mcp] [--source repo\|local\|all]` | 列资源及其 namespace 与根条目归属；`list mcp --source local` 只列 server 名与文件路径，不回显值 |
 | `roles list\|set <id> [--add ids]` | 本地订阅哪些角色 |
 | `roles add\|remove <id>` | 管理员改团队 manifest（走 MR） |
-| `remove <kind> <name...>` | 从**仓库**删除资源（走 MR）。不动你本地副本 —— 合入后 `pull` 会自动移除 |
+| `remove <kind> <name...> [--role id] [--ns ns]` | 从**仓库**删除资源（走 MR）。不动你本地副本 —— 合入后 `pull` 会自动移除 |
 | `readme` | 生成/更新团队仓库首页的 `README.md`（走 MR）。空仓库初始化时会自动带一份，已有仓库补一份用这个 |
-| `doctor [--json]` | 体检：config / 仓库 / manifest / hook / 投递记账 / 落点核对状态 |
+| `doctor [--json]` | 体检：config / 仓库 / manifest / hook / 投递记账 / 落点核对，外加 MCP 四项（文件可解析、缺哪个变量、受管条目是否被你改过、哪些工具没有 MCP 落点） |
 | `uninstall [--force]` | 移除 hook 与投递的文件；撤掉未被你改过的团队区块（AGENTS.md 本体与标记外内容保留）；保留 config 和你改过的副本 |
 
 出问题先跑 `ejdrone doctor`。`--silent` 模式下（hook 用的就是它）问题只写 `~/.ejdrone/debug.log` 且恒返回 0，不会挡住你开工具。

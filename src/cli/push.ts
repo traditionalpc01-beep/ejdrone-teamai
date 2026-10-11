@@ -8,6 +8,8 @@ import type { Config, Resource, ResourceKind } from '../core/types.js';
 import type { CliContext } from './context.js';
 import { requireConfig } from './config.js';
 import { isValidResourceName } from './constants.js';
+import { collectMcpDefs, type McpCollectedItem } from './mcpcollect.js';
+import { defToEntry, mcpRepoFile, upsertMcpServer } from './mcprepo.js';
 import { candidateKey, readTree, scanLocalAgents } from './local.js';
 import { submitMrChange, type MrChange } from './mr.js';
 import { openSnapshot, type Snapshot } from './snapshot.js';
@@ -15,6 +17,13 @@ import { openSnapshot, type Snapshot } from './snapshot.js';
 export interface PushOptions {
   skill?: string[];
   rule?: string[];
+  /**
+   * 从选定工具的用户级 MCP 落点反向采集一个 server 入仓库（可重复）。
+   * `--all` **不**含 mcp，理由写在 collectPending 的注释里。
+   */
+  mcp?: string[];
+  /** 把 --mcp 的采集范围缩到一个工具 id（同名不同内容时由它表态，不猜） */
+  agent?: string;
   all?: boolean;
   role?: string;
   /** 显式指定目标 namespace 目录名；角色映射到多个 namespace 时必须用它挑一个 */
@@ -57,8 +66,81 @@ export function buildTargets(
   return { files, listed };
 }
 
-function absPath(ctx: CliContext, value: string): string {
-  return isAbsolute(value) ? resolve(value) : resolve(ctx.cwd, value);
+// ------------------------------------------------------------------ push --mcp
+
+/**
+ * MCP 反向采集的落点范围：默认全部选定工具，`--agent` 缩到其中一个。
+ * 缩范围不是便利功能 —— 同名不同内容时唯一安全的做法是让成员表态（不许猜）。
+ */
+function mcpScope(ctx: CliContext, config: Config, options: PushOptions): string[] | null {
+  const requested = (options.agent ?? '').trim();
+  if (requested === '') {
+    if (config.agents.length === 0) {
+      ctx.err('错误：还没有选定工具，没有可采集的 MCP 落点。');
+      ctx.err('下一步：ejdrone init <repo> --agent <ids>（或 ejdrone init --force 重选）');
+      return null;
+    }
+    return config.agents;
+  }
+  if (!config.agents.includes(requested)) {
+    ctx.err(`错误：--agent「${requested}」不在你选定的工具里（${config.agents.join(', ') || '无'}）。`);
+    ctx.err('下一步：用 ejdrone list --source local 看得到的工具，或 ejdrone init --force 重选');
+    return null;
+  }
+  return [requested];
+}
+
+/** 改写过的疑似密钥逐条点名：只出字段名与变量名，值永不出现（决定 2 的输出形态）。 */
+function reportSecretRewrites(ctx: CliContext, items: McpCollectedItem[]): void {
+  const lines: string[] = [];
+  for (const item of items) {
+    for (const rewrite of item.rewrites) {
+      const where = `server "${item.name}" 的 ${rewrite.field}.${rewrite.key}`;
+      lines.push(
+        rewrite.reused
+          ? `  - ${where} → \${${rewrite.varName}}（沿用你环境里已有的同名变量，不用再设置）`
+          : `  - ${where} → \${${rewrite.varName}}（新变量名）\n    设置方法：export ${rewrite.varName}='<该凭据的原值>'`,
+      );
+    }
+  }
+  if (lines.length === 0) return;
+  ctx.out(`提示：为了不把你本机的凭据写进仓库，已把 ${lines.length} 处疑似密钥改写成环境变量引用（值不出现在这里）：`);
+  for (const line of lines) ctx.out(line);
+  ctx.out('提示：其他成员要拿到这条 server，需要在自己的环境里 export 同名变量（pull 会点名缺哪个）。');
+}
+
+/**
+ * 把采集到的 server 写进目标 mcp.yaml。一次 --mcp 可以带多条，全部落在同一个文件里，
+ * 所以是**链式套用**（前一条的结果文本是后一条的输入），不能各算各的再合并。
+ */
+function editMcpFile(
+  snapshot: Snapshot,
+  namespace: string,
+  items: McpCollectedItem[],
+): { files: Record<string, string>; listed: string[]; error?: string } {
+  const file = mcpRepoFile(namespace);
+  const abs = join(snapshot.dir, file);
+  let text: string | null = existsSync(abs) ? readFileSync(abs, 'utf8') : null;
+  const files: Record<string, string> = {};
+  const listed: string[] = [];
+
+  for (const item of items) {
+    const entry = defToEntry(item.name, item.def);
+    // tools / requires 是仓库侧的下发过滤器，本机文件里没有这个概念：就地更新时必须留下，
+    // 否则重新 push 一条已在库的 server 会顺手把团队的过滤条件抹掉。
+    const edited = upsertMcpServer(file, text, entry, ['tools', 'requires']);
+    if (!edited.ok || edited.text === undefined) {
+      return { files, listed, error: edited.error ?? '未知错误' };
+    }
+    text = edited.text;
+    const verb = edited.action === 'updated' ? '更新' : '新增';
+    listed.push(`${verb} mcp ${namespace === '' ? '(root)' : `${namespace}/${item.name}`} ← ${item.origins.join('、')}`);
+  }
+  if (text !== null) files[file] = text;
+  return { files, listed };
+}
+
+function absPath(ctx: CliContext, value: string): string {  return isAbsolute(value) ? resolve(value) : resolve(ctx.cwd, value);
 }
 
 function loadSkillPath(ctx: CliContext, input: string): { pending?: Pending; error?: string } {
@@ -109,9 +191,8 @@ function branchPrefixFor(resources: Array<{ kind: ResourceKind; name: string }>)
   return `ejdrone/push-${label}-batch-${digest}-`;
 }
 
-function repoHas(snapshot: Snapshot, resource: Resource): boolean {
-  const pool = snapshot.kinds[resource.kind];
-  return pool.some((r) => r.name === resource.name && r.namespace === resource.namespace);
+function repoHas(snapshot: Snapshot, kind: ResourceKind, name: string, namespace: string): boolean {
+  return snapshot.kinds[kind].some((r) => r.name === name && r.namespace === namespace);
 }
 
 /**
@@ -210,6 +291,13 @@ async function collectPending(
     if (loaded.pending) remember(loaded.pending);
   }
 
+  // 只给了 --mcp：一条 skill/rule 都不扫。反向采集有自己的一套候选（工具的原生 MCP 文件），
+  // 混着扫会把"本地没有新 skill"报成错误，也会让成员以为顺手推了技能。
+  if (byKey.size === 0 && !options.all && (options.mcp?.length ?? 0) > 0) {
+    for (const warning of warnings) ctx.out(`提示：${warning}`);
+    return [];
+  }
+
   const scanned = scanLocalAgents(ctx, agentIds);
   warnings.push(...scanned.warnings);
 
@@ -220,6 +308,10 @@ async function collectPending(
   const skipped = scanned.candidates.length - fresh.length;
 
   if (options.all) {
+    // --all 只含 skills/rules，**不含 mcp**（有意，别"顺手补上"）：
+    // 各工具的 MCP 落点是成员日常随手配置的共享文件，里面通常混着个人 server 与明文 token。
+    // 让 --all 把它们全量扫进 MR，等于把每个人的私人配置往团队评审里推，
+    // 而"疑似密钥自动改写"只能按键名兜住一部分 —— 显式 --mcp <name> 才是要教给成员的习惯。
     if (skipped > 0) warnings.push(`仓库里已有 ${skipped} 条同名资源，--all 只推新条目；要更新请显式 --skill/--rule`);
     if (fresh.length === 0) {
       ctx.err('错误：本地候选都在仓库里有了，没有要推的新内容。');
@@ -232,12 +324,12 @@ async function collectPending(
   } else if (byKey.size === 0) {
     if (fresh.length === 0) {
       ctx.err('错误：选定的工具目录里没有可推送的新 skill/rule（团队已入库的不重复推）。');
-      ctx.err('下一步：先在工具目录里写好内容，或用 --skill/--rule 指定要更新的条目路径');
+      ctx.err('下一步：先在工具目录里写好内容，或用 --skill/--rule 指定要更新的条目路径，或 --mcp <name> 采集 MCP server');
       return null;
     }
     if (!ctx.interactive) {
       ctx.err('错误：非交互模式需要显式选择。');
-      ctx.err('下一步：用 --all 推送全部本地候选，或 --skill <path> / --rule <path> 指定条目');
+      ctx.err('下一步：用 --all 推送全部本地候选，或 --skill <path> / --rule <path> 指定条目（MCP 用 --mcp <name>）');
       return null;
     }
     const chosen = await ctx.choose(
@@ -278,7 +370,7 @@ export async function pushCommand(ctx: CliContext, options: PushOptions): Promis
   const snapshot = loaded.snapshot;
 
   const pendings = await collectPending(ctx, options, config.agents, snapshot);
-  if (pendings === null || pendings.length === 0) return 1;
+  if (pendings === null) return 1;
 
   const namespace = resolveTargetNamespace(ctx, config, snapshot, options);
   if (namespace === null) return 1;
@@ -289,16 +381,50 @@ export async function pushCommand(ctx: CliContext, options: PushOptions): Promis
     ctx.err('下一步：重命名该目录/文件（只允许小写字母、数字、-、_）后重跑 ejdrone push');
     return 1;
   }
-  const { files, listed } = targets;
+  const files: Record<string, string> = { ...targets.files };
+  const listed: string[] = [...targets.listed];
+  if (listed.length === 0 && (options.mcp?.length ?? 0) === 0) {
+    ctx.err('错误：没有要推送的内容。');
+    return 1;
+  }
+
+  // --mcp：反向采集 → 疑似密钥改写 → 写进目标 mcp.yaml。任一条采不到就整体拒绝（不部分提交），
+  // 因为成员会以为"都推上去了"，而漏掉的那条在别人机器上就是缺一个 server。
+  let mcpItems: McpCollectedItem[] = [];
+  if ((options.mcp?.length ?? 0) > 0) {
+    const scope = mcpScope(ctx, config, options);
+    if (scope === null) return 1;
+    const collected = collectMcpDefs(ctx, scope, options.mcp ?? [], mcpRepoFile(namespace));
+    for (const note of collected.notes) ctx.out(`提示：${note}`);
+    if (!collected.ok) {
+      for (const line of collected.errors) ctx.err(`错误：${line}`);
+      return 1;
+    }
+    mcpItems = collected.items;
+    const edited = editMcpFile(snapshot, namespace, mcpItems);
+    if (edited.error) {
+      ctx.err(`错误：${edited.error}`);
+      ctx.err('下一步：该文件由成员手写维护，本工具不重写它；照 mcp/mcp.yaml 现有条目的形状手工加一条再 ejdrone push 也可');
+      return 1;
+    }
+    Object.assign(files, edited.files);
+    listed.push(...edited.listed);
+    reportSecretRewrites(ctx, mcpItems);
+  }
 
   ctx.out('待推送：');
   for (const line of listed) ctx.out(`  ${line}`);
 
-  const single = pendings.length === 1 ? pendings[0] : undefined;
-  const verb = single ? (repoHas(snapshot, { ...single.resource, namespace }) ? 'update' : 'add') : 'update';
+  const units = [
+    ...pendings.map((p) => ({ kind: p.resource.kind, name: p.resource.name })),
+    ...mcpItems.map((m) => ({ kind: 'mcp' as const, name: m.name })),
+  ];
+  const single = units.length === 1 ? units[0] : undefined;
+  const verb = single ? (repoHas(snapshot, single.kind, single.name, namespace) ? 'update' : 'add') : 'update';
+  const prefix = single ? (single.kind === 'rules' ? 'docs' : 'feat') : 'feat';
   const title = single
-    ? `${single.resource.kind === 'skills' ? 'feat' : 'docs'}(${namespace === '' ? 'root' : namespace}): ${verb} ${single.resource.name}`
-    : `feat(team): push ${pendings.length} resources`;
+    ? `${prefix}(${namespace === '' ? 'root' : namespace}): ${verb} ${single.kind === 'mcp' ? `mcp ${single.name}` : single.name}`
+    : `${prefix}(team): push ${units.length} resources`;
   const body = [
     '由 ejdrone push 生成。',
     '',
@@ -306,6 +432,14 @@ export async function pushCommand(ctx: CliContext, options: PushOptions): Promis
     '',
     '资源：',
     ...listed.map((line) => `- ${line}`),
+    ...(mcpItems.length > 0
+      ? [
+          '',
+          `MCP 条目写入文件：${mcpRepoFile(namespace)}`,
+          '本工具的疑似密钥自动改写只认键名（TOKEN/KEY/SECRET/PASSWORD 结尾）与凭据形状的取值，',
+          '请评审时再确认一遍：仓库里不该有明文 token。',
+        ]
+      : []),
     '',
     `提交者角色：${config.primaryRole ?? '（未设置）'}`,
     '请评审：内容是否适合团队共享、是否含密钥。',
@@ -314,7 +448,7 @@ export async function pushCommand(ctx: CliContext, options: PushOptions): Promis
   const change: MrChange = {
     files,
     removes: [],
-    branchPrefix: branchPrefixFor(pendings.map((p) => ({ kind: p.resource.kind, name: p.resource.name }))),
+    branchPrefix: branchPrefixFor(units),
     title,
     body,
   };

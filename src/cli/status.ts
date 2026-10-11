@@ -1,11 +1,14 @@
 import { loadLedger } from '../core/ledger.js';
-import { allResources } from '../core/types.js';import { ledgerPath } from '../state.js';
+import { allResources } from '../core/types.js';
+import { ledgerPath } from '../state.js';
+import type { Config, Ledger } from '../core/types.js';
 import type { CliContext } from './context.js';
 import { requireConfig } from './config.js';
-import { buildDelivery } from './delivery.js';
-import { auditLedger } from './ledgercheck.js';
+import { buildDelivery, type Delivery } from './delivery.js';
+import { auditLedger, type LedgerAudit } from './ledgercheck.js';
 import { scanLocalAgents } from './local.js';
-import { openSnapshot } from './snapshot.js';
+import { scanLocalMcp, type LocalMcpEntry } from './mcpscan.js';
+import { openSnapshot, type Snapshot } from './snapshot.js';
 
 export async function statusCommand(ctx: CliContext): Promise<number> {
   const configResult = requireConfig(ctx);
@@ -76,7 +79,84 @@ export async function statusCommand(ctx: CliContext): Promise<number> {
     for (const entry of audit.missing) ctx.out(`  ${entry.path}（${entry.resource}）`);
   }
 
+  mcpSection(ctx, config, delivery, ledger, audit, snapshot);
+
   ctx.out('');
   ctx.out(`快照 commit：${snapshot.head.slice(0, 12)}（分支 ${snapshot.branch}）`);
   return 0;
+}
+
+/**
+ * MCP 一段话讲清三件事：仓库里有什么、本机哪些条目我们认领着、本机还有什么没入库。
+ * 仓库和本地都空时整段跳过 —— 1.0 的仓库不该因为新 kinds 而多出一节无关输出。
+ * 这里只出 server 名、工具 id 与文件路径：那些共享文件里可能写着明文 token。
+ */
+function mcpSection(
+  ctx: CliContext,
+  config: Config,
+  delivery: Delivery,
+  ledger: Ledger,
+  audit: LedgerAudit,
+  snapshot: Snapshot,
+): void {
+  const repoServers = snapshot.kinds.mcp;
+  const scan = scanLocalMcp(ctx.home, ctx.env, config.agents);
+  if (repoServers.length === 0 && scan.entries.length === 0 && snapshot.mcpFileError === null) return;
+
+  ctx.out('');
+  if (snapshot.mcpFileError !== null) {
+    ctx.out(`MCP：本次停发（已装内容不动）：${snapshot.mcpFileError}`);
+    ctx.out('  → 修好 mcp/mcp.yaml 后 ejdrone pull 会自动恢复下发');
+    return;
+  }
+  ctx.out(`MCP：仓库 ${repoServers.length} 条；本机条目 ${ledgerManagedCount(ledger)} 条`);
+
+  // 落后：本次计划里的条目还没进账本 = 本机那份配置里还没有这条 server
+  const delivered = new Map<string, string>();
+  for (const entry of ledger.entries) {
+    for (const key of Object.keys(entry.managedKeys ?? {})) delivered.set(key, entry.path);
+  }
+  const behind = new Map<string, string[]>();
+  for (const write of delivery.writes) {
+    const entries = write.merge?.entries;
+    if (!entries) continue;
+    for (const key of Object.keys(entries)) {
+      if (delivered.has(key)) continue;
+      const tools = behind.get(key) ?? [];
+      tools.push(write.resource.replace(/^mcp:/, '').replace(/-merge$/, ''));
+      behind.set(key, tools);
+    }
+  }
+  for (const [name, tools] of behind) ctx.out(`  落后：${name}（还没投到 ${tools.join('、')}）`);
+
+  for (const entry of audit.modified) {
+    if (!entry.resource.startsWith('mcp:')) continue;
+    const keys = Object.keys(entry.managedKeys ?? {}).join('、');
+    ctx.out(`  本地改过（pull 保留你的那条，只点名）：${entry.path}${keys ? `（${keys}）` : ''}`);
+  }
+
+  const repoNames = new Set(repoServers.map((r) => r.name));
+  const local = new Map<string, LocalMcpEntry>();
+  for (const entry of scan.entries) {
+    if (repoNames.has(entry.name)) continue;
+    if (!local.has(entry.name)) local.set(entry.name, entry);
+  }
+  for (const entry of local.values()) {
+    ctx.out(
+      `  待推送：${entry.name}（来自 ${entry.agent}：${entry.file}）${entry.collectable ? '' : ' —— TOML 落点不反向采集，要入库请手写进 mcp/mcp.yaml'}`,
+    );
+  }
+  if (local.size > 0) {
+    const sample = [...local.keys()][0];
+    ctx.out(`  → 用 ejdrone push --mcp ${sample ?? '<name>'} 提交（疑似密钥会自动改写成 \${VAR}）`);
+  }
+  if (scan.unsupported.length > 0) {
+    ctx.out(`  提示：这些工具没有用户级 MCP 落点，收不到团队 server：${scan.unsupported.join('、')}`);
+  }
+}
+
+function ledgerManagedCount(ledger: Ledger): number {
+  let total = 0;
+  for (const entry of ledger.entries) total += Object.keys(entry.managedKeys ?? {}).length;
+  return total;
 }
