@@ -156,6 +156,13 @@ function applyRegionWrite(
   const deliveredHash = hashContent(deliveredInner);
   const entry = ledgerEntry(input.ledger, path);
 
+  // 零规则时不去创建或改动 AGENTS.md —— 既没内容可投，也没有区块要清。
+  // 只有"已存在区块"（团队删掉了最后一条 rule）才继续走下面的清空路径。
+  if (write.content.trim() === '') {
+    const current = existsSync(path) ? readFileSync(path, 'utf8') : '';
+    if (locate(current, start, end) === null) return;
+  }
+
   if (!existsSync(path)) {
     const newText = blockText(start, end, write.content);
     writeFileContent(path, newText);

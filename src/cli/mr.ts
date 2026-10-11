@@ -66,15 +66,17 @@ async function submitMrChangeInner(
   const targetBranch = snapshot.branch;
 
   const remote = await listRemoteBranches(dir, ctx.env);
+  // 空仓库（刚建好、一个提交都没有）：没有可评审的基线，MR 也没有目标分支可指。
+  const bootstrap = remote.length === 0;
   const reusable = remote.filter((name) => name.startsWith(change.branchPrefix)).sort();
   const existing = reusable[reusable.length - 1];
-  const branch = existing ?? `${change.branchPrefix}${stamp()}`;
+  const branch = bootstrap ? targetBranch : existing ?? `${change.branchPrefix}${stamp()}`;
   if (existing) {
     ctx.out(`该资源已有未合并分支 ${existing}，就地更新（不再开重复 MR 分支）`);
   }
 
-  // from 用远端分支名：复用时就从那条分支继续，新建时从默认分支继续
-  await createBranch(dir, branch, existing ?? targetBranch, ctx.env);
+  // from 用远端分支名：复用时就从那条分支继续，新建时从默认分支继续；空仓库无起点
+  await createBranch(dir, branch, bootstrap ? undefined : existing ?? targetBranch, ctx.env);
 
   const written = Object.entries(change.files);
   if (written.length > 0) {
@@ -98,6 +100,12 @@ async function submitMrChangeInner(
 
   await commitAll(dir, change.title, ctx.env);
   await push(dir, branch, ctx.env);
+
+  if (bootstrap) {
+    ctx.out(`团队仓库首个提交已直接落到 ${branch}：空仓库没有可评审的基线，之后的变更继续走 MR`);
+    return { code: 0, branch, mrUrl: null };
+  }
+
   ctx.out(`已推送分支 ${branch}（等待合入 ${targetBranch}）`);
 
   const provider = makeGitProvider(config, ctx.env);

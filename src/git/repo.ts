@@ -110,6 +110,12 @@ async function remoteHasBranch(dir: string, branch: string, env?: NodeJS.Process
   return stdout.trim() !== '';
 }
 
+/** 远端是否已有任何分支/提交。新建的空团队仓库返回 false。 */
+export async function remoteHasAnyCommit(dir: string, env?: NodeJS.ProcessEnv): Promise<boolean> {
+  const { stdout } = await git(['-C', dir, 'ls-remote', '--heads', 'origin'], { env });
+  return stdout.trim() !== '';
+}
+
 /**
  * 默认分支名。回落链：origin/HEAD → 远端的 main → 远端的 master → 'main'。
  * `git fetch` 不刷新 origin/HEAD（只有 clone / remote set-head 会），所以本地符号引用
@@ -146,6 +152,23 @@ export async function defaultBranch(dir: string, env?: NodeJS.ProcessEnv): Promi
 export async function fetchReset(dir: string, branch?: string, env?: NodeJS.ProcessEnv): Promise<CheckoutHandle> {
   const target = branch ?? (await defaultBranch(dir, env));
   await git(['-C', dir, 'fetch', 'origin'], { env });
+
+  // 刚建好的空仓库没有任何提交，reset origin/main 会以 "unknown revision" 失败，
+  // 而设计流程的第一步正是在空仓库上 init。这里把它当合法状态：同步到"空"。
+  if (!(await remoteHasAnyCommit(dir, env))) return { dir, head: '' };
+
+  if (!(await remoteHasBranch(dir, target, env))) {
+    const { stdout } = await git(['-C', dir, 'ls-remote', '--heads', 'origin'], { env });
+    const names = stdout
+      .split('\n')
+      .map((line) => /refs\/heads\/(.+)$/.exec(line)?.[1]?.trim())
+      .filter((name): name is string => Boolean(name));
+    throw new Error(
+      `远端没有分支 ${target}（现有分支：${names.join(', ') || '无'}）。` +
+        '下一步：在团队仓库设置默认分支，或修正本地 origin/HEAD',
+    );
+  }
+
   await git(['-C', dir, 'reset', '--hard', `origin/${target}`], { env });
   const { stdout } = await git(['-C', dir, 'rev-parse', 'HEAD'], { env });
   return { dir, head: stdout.trim() };
@@ -186,13 +209,19 @@ function resolveInside(root: string, relPath: string): string {
   return abs;
 }
 
+/**
+ * 建（或重置）分支。`from` 省略时从当前 HEAD 起 —— 空仓库还没有 origin/<任何分支>，
+ * 首笔引导提交只能这样开出来。
+ */
 export async function createBranch(
   dir: string,
   branch: string,
-  from: string,
+  from?: string,
   env?: NodeJS.ProcessEnv,
 ): Promise<void> {
-  await git(['-C', dir, 'checkout', '-B', branch, `origin/${from}`], { env });
+  const args = ['-C', dir, 'checkout', '-B', branch];
+  if (from) args.push(`origin/${from}`);
+  await git(args, { env });
 }
 
 function authorArgs(env: NodeJS.ProcessEnv | undefined): string[] {

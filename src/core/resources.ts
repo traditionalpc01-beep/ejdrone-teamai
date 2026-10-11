@@ -233,13 +233,17 @@ function deriveDescription(text: string, name: string): string {
     paragraph.push(line.trim());
   }
   const joined = paragraph.join(' ').replace(/\s+/g, ' ').trim();
-  return joined === '' ? name : joined;
+  if (joined === '') return name;
+  // 不截断的话，一条 bullet 列表会被摊成一整段超长 description：既难读又会把 YAML 折成多行
+  return joined.length > 160 ? `${joined.slice(0, 159).replace(/\s+\S*$/, '')}…` : joined;
 }
 
+/** 自带结束围栏的完整 frontmatter 块。调用方不要再补 closing。 */
 function frontmatterBlock(map: Record<string, unknown>): string {
-  const text = stringifyYaml(map);
+  // lineWidth: 0 —— 默认 100 列会把长 description 折成多行，读起来乱、也让 frontmatter 边界更难辨认
+  const text = stringifyYaml(map, { lineWidth: 0 });
   const trimmed = text.endsWith('\n') ? text.slice(0, -1) : text.replace(/\s+$/, '');
-  return `---\n${trimmed}\n`;
+  return `---\n${trimmed}\n---\n`;
 }
 
 export interface CompleteFrontmatterResult {
@@ -276,5 +280,5 @@ export function completeFrontmatter(content: string, name: string): CompleteFron
   if (!hasName) next.name = name;
   if (!hasDescription) next.description = deriveDescription(split.body, name);
 
-  return { content: `${frontmatterBlock(next)}${split.closing}${split.body}`, changed: true };
+  return { content: `${frontmatterBlock(next)}${split.body}`, changed: true };
 }

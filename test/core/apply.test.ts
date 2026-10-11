@@ -238,6 +238,39 @@ describe('applyPlan: region (block) writes', () => {
     expect(out.result.written).toHaveLength(1);
     expect(readFileSync(path, 'utf8')).toBe(`${START}\nNEW\n${END}\nOUTSIDE\n${START}\nBBB\n${END}\n`);
   });
+
+  it('零规则 + 文件不存在：完全不碰这个文件，也不记账', () => {
+    const path = join(home, 'AGENTS.md');
+    const w: PlannedWrite = { path, content: '', resource: 'rules:team', region: { start: START, end: END } };
+    const out = applyPlan(makeInput({ writes: [w], activeResources: ['rules:team'], ledger: ledgerWith([]) }));
+    expect(out.result.written).toHaveLength(0);
+    expect(out.result.kept).toHaveLength(0);
+    expect(existsSync(path)).toBe(false);
+    expect(out.ledger.entries).toHaveLength(0);
+  });
+
+  it('零规则 + 文件里没有区块：不去创建一个空区块', () => {
+    const path = join(home, 'AGENTS.md');
+    seedFile(path, '用户自己的说明\n');
+    const w: PlannedWrite = { path, content: '', resource: 'rules:team', region: { start: START, end: END } };
+    const out = applyPlan(makeInput({ writes: [w], activeResources: [], ledger: ledgerWith([]) }));
+    expect(out.result.written).toHaveLength(0);
+    expect(readFileSync(path, 'utf8')).toBe('用户自己的说明\n');
+  });
+
+  it('零规则 + 已存在区块：执行清空但保留标记（团队删掉了最后一条 rule）', () => {
+    const path = join(home, 'AGENTS.md');
+    seedFile(path, `OUTSIDE\n${START}\nOLD RULE\n${END}\n`);
+    const ledger = ledgerWith([rec(path, hashContent('OLD RULE\n'), 'rules:team')]);
+    const w: PlannedWrite = { path, content: '', resource: 'rules:team', region: { start: START, end: END } };
+    const out = applyPlan(makeInput({ writes: [w], activeResources: ['rules:team'], ledger }));
+    expect(out.result.written).toHaveLength(1);
+    const after = readFileSync(path, 'utf8');
+    expect(after).toContain('OUTSIDE');
+    expect(after).toContain(START);
+    expect(after).toContain(END);
+    expect(after).not.toContain('OLD RULE');
+  });
 });
 
 describe('applyPlan: idempotency across writes and deletes', () => {

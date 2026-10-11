@@ -168,6 +168,34 @@ describe('completeFrontmatter', () => {
     expect(res.content).toContain('First paragraph.');
   });
 
+  it('补全无 frontmatter 的文件时必须自带结束围栏（真机暴露的缺陷）', () => {
+    const body = '# 摄影交付口径\n\n- 目录名固定\n- 口令 DEMO-TRIAL-1\n';
+    const res = completeFrontmatter(body, 'shoot-convention');
+    const fences = res.content.split('\n').filter((line) => line.trim() === '---');
+    expect(fences).toHaveLength(2);
+    expect(res.content.startsWith('---\n')).toBe(true);
+    // 第二个围栏之后必须还是原正文，不能被吞进 YAML
+    expect(res.content.split('---\n')[2]).toBe(body);
+    // 补全结果要能被自己再解析出来（否则下游 block/mdc 会把 YAML 当正文投递）
+    const again = completeFrontmatter(res.content, 'ignored');
+    expect(again.changed).toBe(false);
+  });
+
+  it('补全已有 frontmatter 时不重复结束围栏', () => {
+    const res = completeFrontmatter('---\ndescription: existing\n---\n# T\ntext\n', 's2');
+    expect(res.content.split('\n').filter((line) => line.trim() === '---')).toHaveLength(2);
+    expect(res.content).toContain('description: existing');
+    expect(res.content.split('---\n')[2]).toBe('# T\ntext\n');
+  });
+
+  it('description 过长会被截断成单行，不把 YAML 折成多行', () => {
+    const long = `# T\n${'- 一条很长的团队约定 '.repeat(20)}\n`;
+    const res = completeFrontmatter(long, 'long-rule');
+    const descLine = res.content.split('\n').find((line) => line.startsWith('description:')) ?? '';
+    expect(descLine.length).toBeLessThan(200);
+    expect(res.content.split('\n')[3]?.trim()).toBe('---');
+  });
+
   it('leaves content untouched when both name and description are present', () => {
     const input = '---\nname: x\ndescription: y\n---\nbody\n';
     const res = completeFrontmatter(input, 'ignored');
