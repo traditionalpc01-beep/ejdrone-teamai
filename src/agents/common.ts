@@ -9,7 +9,7 @@ import {
   type Resource,
 } from '../core/types.js';
 import { removeHook, upsertHook } from '../hooks.js';
-import { resolveMcpResources } from '../core/mcp.js';
+import { referencesEnvVar, resolveMcpResources } from '../core/mcp.js';
 import {
   hookTarget,
   mcpTargetPath,
@@ -134,6 +134,8 @@ export function planMcpFor(
   for (const s of skipped) {
     warnings.push(`${label}：环境变量未定义 ${s.missing.map((v) => `\${${v}}`).join('、')}，server "${s.name}" 本次跳过`);
   }
+  // 只要有一条把 ${VAR} 解析成了明文，这个文件落盘后就必须是 0600。
+  const hasResolvedValue = applicable.some((r) => referencesEnvVar(mcpPayload(r)));
   const entries = renderMcpEntries({
     style: target.style,
     pointer: target.pointer,
@@ -149,7 +151,10 @@ export function planMcpFor(
       // merge 投递的 content 恒为空（§3.3）：文件归成员，apply 层只按 entries 做条目级合并。
       content: '',
       resource: mcpMergeResourceKey(id),
-      merge: { format: target.format, pointer: target.pointer, entries },
+      // 只在真需要收紧时带这个标记：多余的 false 会让 merge 形状与"没解析过值"时不同。
+      merge: hasResolvedValue
+        ? { format: target.format, pointer: target.pointer, entries, hasResolvedValue }
+        : { format: target.format, pointer: target.pointer, entries },
     },
   ];
 }

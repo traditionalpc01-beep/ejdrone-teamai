@@ -581,3 +581,45 @@ describe('applyPlan: merge delivery (受管条目合并)', () => {
     expect(doc.mcpServers.GitHub).toEqual({ url: 'https://gh' });
   });
 });
+
+/**
+ * 真机 M6 试验暴露：把 ${VAR} 解析成明文写进 ~/.claude.json（原本 0644）之后，
+ * 文件权限没收紧 —— 计划 §3.3 第 6 条要求含已解析值就 0600。
+ * 收紧与否由 planMcp 标注（merge.hasResolvedValue），不让 apply 猜内容像不像密钥。
+ */
+describe('applyPlan: 含已解析值的 merge 投递必须收紧权限', () => {
+  it('成员已有的 0644 文件被写入解析值 → 落成 0600', () => {
+    const path = join(home, 'loose.json');
+    seedFile(path, JSON.stringify({ mcpServers: { mine: { command: 'keep' } } }, null, 2) + '\n');
+    expect(statSync(path).mode & 0o777).toBe(0o644);
+
+    const w: PlannedWrite = {
+      path,
+      content: '',
+      resource: 'mcp:claude-merge',
+      merge: {
+        format: 'json',
+        pointer: ['mcpServers'],
+        entries: { team: JSON.stringify({ url: 'https://x', headers: { Authorization: 'Bearer literal-secret' } }) },
+        hasResolvedValue: true,
+      },
+    };
+    applyPlan(makeInput({ writes: [w], activeResources: ['mcp:claude-merge'] }));
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    const doc = JSON.parse(readFileSync(path, 'utf8')) as { mcpServers: Record<string, unknown> };
+    expect(doc.mcpServers.mine).toEqual({ command: 'keep' }); // 收紧权限不得动成员条目
+  });
+
+  it('没带解析值的 merge 投递不改成员文件原有权限', () => {
+    const path = join(home, 'loose2.json');
+    seedFile(path, JSON.stringify({ mcpServers: { mine: { command: 'keep' } } }, null, 2) + '\n');
+    const w: PlannedWrite = {
+      path,
+      content: '',
+      resource: 'mcp:claude-merge',
+      merge: { format: 'json', pointer: ['mcpServers'], entries: { team: JSON.stringify({ command: 'npx' }) } },
+    };
+    applyPlan(makeInput({ writes: [w], activeResources: ['mcp:claude-merge'] }));
+    expect(statSync(path).mode & 0o777).toBe(0o644);
+  });
+});

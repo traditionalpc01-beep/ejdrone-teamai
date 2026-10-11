@@ -419,6 +419,9 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 | MCP 项目级落点 | 支持（含 gitExclude、Codex trust） | 不支持 | 我们无 project scope |
 | Windows hook | 逐工具解析各自 shell（WorkBuddy 用自带 PortableGit） | 统一 Git Bash 绝对路径，没有就 installed:false；workbuddy 是否必须走其自带 PortableGit `sh.exe` 列入 M10 真机探测清单 | 统一路径覆盖面最大；workbuddy 的特例先探测再决定要不要开口子 |
 | learnings 提示 | Stop hook 摩擦评分自动提示 | 主线 = 内置 skill 教 agent 主动建议；自动提示为 stretch | 见 §2 不做表 |
+| 含已解析值的文件权限 | 写入时收紧到 0600 | 同样收紧，但**不回松** | 回松要把原权限记进账本；0600 不会让成员丢访问，反而防同机他人读明文 token。真机卸载后 `~/.claude.json` 仍 0600 是预期 |
+| `status` 里的本机私有 server | 不列 | 列在"待推送"并紧跟 `push --mcp` 用法 | 措辞可再议；`push --all` 已明确不含 MCP，改文案要连带动命令面一批用例 |
+| 疑似密钥进仓库 | 靠成员自觉 + 评审 | `push --mcp` 自动把 env/headers 里的凭据改写成 `${VAR}`；凭据出现在 command/args/url 时**拒绝入库** | 换掉整条命令会把服务地址一起吞掉，只有作者会拆；静默提交明文是红线 |
 
 ### 执行期追加（M5/M6 落地时定下，后续里程碑照此，不要"顺手改回" teamai 的做法）
 

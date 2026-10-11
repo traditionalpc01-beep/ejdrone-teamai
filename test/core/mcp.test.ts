@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   collectMcp,
+  referencesEnvVar,
   resolveMcpResources,
   resolveServerDef,
   resolveVars,
@@ -461,5 +462,18 @@ describe('collectResources 接线', () => {
     expect(undeclared.kinds.mcp).toEqual([]);
     expect(undeclared.warnings).toEqual(['mcp/fe is not a declared namespace; skipped']);
     expect(undeclared.mcpFileError).toBeNull();
+  });
+});
+
+describe('referencesEnvVar：哪些条目算"含已解析值"', () => {
+  it('url / headers / env / args 里的 ${VAR} 都认；连续调用不得因全局正则漏判', () => {
+    const withHeader = { transport: 'http', url: 'https://x', headers: { Authorization: 'Bearer ${T}' } } as const;
+    const plain = { transport: 'stdio', command: 'npx', args: ['-y', 'p'] } as const;
+    for (let i = 0; i < 3; i += 1) {
+      expect(referencesEnvVar(withHeader)).toBe(true);
+      expect(referencesEnvVar(plain)).toBe(false);
+      expect(referencesEnvVar({ transport: 'stdio', command: 'run', env: { K: '${V}' } } as never)).toBe(true);
+      expect(referencesEnvVar({ transport: 'stdio', command: 'run ${BIN}' } as never)).toBe(true);
+    }
   });
 });

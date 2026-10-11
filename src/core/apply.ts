@@ -47,6 +47,8 @@ export function applyPlan(input: ApplyInput, options: ApplyOptions = {}): ApplyO
   const deliveredAt = now().toISOString();
   const active = new Set(input.activeResources);
   const tighten = new Set(options.resolvedValuePaths ?? []);
+  // merge 投递自己带标记（planMcp 知道哪条解析过 ${VAR}），不必让调用方额外传一份路径清单。
+  for (const write of input.writes) if (write.merge?.hasResolvedValue) tighten.add(write.path);
 
   const result: ApplyResult = { written: [], deleted: [], kept: [] };
   const entriesByPath = new Map<string, LedgerEntry>();

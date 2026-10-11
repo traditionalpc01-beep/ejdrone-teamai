@@ -207,6 +207,8 @@ export function collectMcp(checkoutRoot: string, manifestNs: Set<string>): McpCo
 // ------------------------------------------------------------------ ${VAR} 解析
 
 const VAR_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+// 带 /g 的正则 .test() 会推进 lastIndex，连续判断会漏 —— 判存在用这个不带 g 的。
+const VAR_RE_NON_GLOBAL = /\$\{[A-Za-z_][A-Za-z0-9_]*\}/;
 
 export interface ResolvedText {
   value: string;
@@ -273,6 +275,20 @@ export interface ResolvedMcp {
 }
 
 /** delivery/adapter 层消费入口：先过这里，再进条目渲染。 */
+/**
+ * 这条 server 的原始定义里有没有 `${VAR}` 引用。
+ * 投递完成后 apply 需要知道这件事才能把文件权限收紧到 0600 —— 让 apply 去猜内容像不像密钥，
+ * 会把不含密钥的文件也改掉权限。
+ */
+export function referencesEnvVar(def: McpServerDef): boolean {
+  const texts: string[] = [];
+  if (def.url) texts.push(def.url);
+  if (def.command) texts.push(def.command);
+  texts.push(...(def.args ?? []));
+  for (const bag of [def.env, def.headers]) if (bag) texts.push(...Object.values(bag));
+  return texts.some((t) => VAR_RE_NON_GLOBAL.test(t));
+}
+
 export function resolveMcpResources(servers: Resource[], env: NodeJS.ProcessEnv): ResolvedMcp {
   const out: Resource[] = [];
   const skipped: Array<{ name: string; missing: string[] }> = [];

@@ -164,6 +164,12 @@ export interface PlannedWrite {
     format: 'json' | 'toml';
     pointer: string[];
     entries: Record<string, string>;
+    /**
+     * 这些条目里含有把 `${VAR}` 解析成明文后的值 —— apply 必须把该文件收紧到 0600。
+     * 由 planMcp 显式标注：apply 自己看不出来（它只拿到已经渲染好的文本，
+     * 而"像不像密钥"这种猜测会把没有密钥的文件也一起改掉权限）。
+     */
+    hasResolvedValue?: boolean;
   };
 }
 

@@ -52,6 +52,8 @@
 - MCP 走**条目级合并**（`PlannedWrite.merge` + `LedgerEntry.managedKeys`）：落点是成员在用的共享配置文件，
   所以这类路径**永不进 unlink 分支**，"被本地改过"只比我们自己那几个条目（JSON 用键排序后的规范化文本，
   格式化抖动不算改过；TOML 按表块原文逐字节）。卸载时用 `managedKeys` 反向合并 `desired={}` 只撤自己那几条。
+- 把 `${VAR}` 解析成明文写进成员文件时，该文件必须收紧到 0600：判据由 planMcp 标在 `merge.hasResolvedValue` 上，
+  **不要让 apply 猜内容像不像密钥**（猜会把不含密钥的文件也改权限）。权限只收紧不回松。
 - `mcp/mcp.yaml` 解析不出来 = MCP 整体停发，**不是空集**：当成空集会把全员已装的 server 全删掉。
   判定在 `snapshot.mcpFileError`，`buildDelivery` 据此把 `mcp` 加进 `haltedKinds`，pull 退出码 1。
 - 工具有没有某项能力由 `paths.ts` 的表决定（`mcpTarget` 缺席 → 适配器不实现 `planMcp`），

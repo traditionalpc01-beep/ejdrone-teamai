@@ -188,7 +188,12 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
 
   // 空目录只能报告、不能删：`~/.trae/rules` 这类是工具原生的规则目录，
   // 我们从没建过它，删了就是动用户的目录。分不清"谁建的"时，宁可多说一句。
-  const emptyRoots = managedRoots(ctx, adapters).filter(
+  // 只报选定工具里我们真删过文件的根：uninstall 遍历全注册表，
+  // 不过滤会把成员自己机器上原本就有的空目录（如没勾过的工具的 rules 目录）说成"可能是我们建的"。
+  const touchedRoots = managedRoots(ctx, adapters).filter((root) =>
+    removed.some((entry) => entry.path.startsWith(root + '/')),
+  );
+  const emptyRoots = touchedRoots.filter(
     (root) => existsSync(root) && readdirSync(root).length === 0,
   );
 
