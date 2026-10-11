@@ -219,19 +219,30 @@ export async function doctorCommand(ctx: CliContext, options: DoctorOptions): Pr
     }
   }
 
+  // 未核对落点只报"你真的选定了"的工具：16 工具后若仍列全表，
+  // 每人 init 时勾了 2-3 个也会被十几条无关 WARN 刷屏，WARN 就此没人看。
+  const selected = new Set(config?.agents ?? []);
   const unverified = registry()
     .all()
     .filter((adapter) => probeUnverified(adapter.id))
     .map((adapter) => adapter.id);
-  if (unverified.length > 0) {
+  const mine = unverified.filter((id) => selected.has(id));
+  const others = unverified.filter((id) => !selected.has(id));
+
+  if (mine.length > 0) {
     add({
       id: 'probe',
       status: 'WARN',
-      message: `这些工具落点未真机核对：${unverified.join('、')}`,
-      hint: unverified.map((id) => `${id}: ${TOOL_PATHS[id]?.probe ?? ''}`).join('\n'),
+      message: `你选定的工具有 ${mine.length} 个落点未真机核对：${mine.join('、')}`,
+      hint: mine.map((id) => `${id}: ${TOOL_PATHS[id]?.probe ?? ''}`).join('\n'),
     });
+  } else if (selected.size === 0) {
+    add({ id: 'probe', status: 'PASS', message: '尚未选定工具，无落点需要核对' });
   } else {
-    add({ id: 'probe', status: 'PASS', message: '所有落点均已真机核对' });
+    add({ id: 'probe', status: 'PASS', message: '所选工具的落点均已真机核对' });
+  }
+  if (others.length > 0) {
+    note(`提示：另有 ${others.length} 个未选定工具的落点未真机核对（${others.join('、')}），你没勾这些工具，不影响你`);
   }
 
   const fails = checks.filter((c) => c.status === 'FAIL').length;

@@ -1,7 +1,41 @@
 /**
- * 团队仓库首页的说明书 —— 无依赖的纯模板，空仓库引导提交与 ejdrone readme 共用。
+ * 团队仓库首页的说明书 —— 空仓库引导提交与 ejdrone readme 共用。
  * 放在叶子模块是因为 cli/mr.ts 也要用它，而 readme.ts 反过来要用 mr.ts，不能让它们互相引用。
+ *
+ * 投递矩阵从 `agents/paths.ts` 生成：手写一张 16 行的表一定会过期，
+ * 而这张表是成员判断"我的东西落在哪"的唯一依据（1.0 试验记录的缺陷 5「团队仓库是黑箱」就是这类漂移）。
  */
+
+import type { ToolPathSpec } from '../agents/paths.js';
+import { TOOL_PATHS } from '../agents/paths.js';
+
+function skillsCell(spec: ToolPathSpec): string {
+  return `~/${spec.rootRel}/${spec.skillsSubdir}/`;
+}
+
+function rulesCell(spec: ToolPathSpec): string {
+  switch (spec.rulesMode) {
+    case 'rulesdir':
+      return `~/${spec.rootRel}/${spec.rulesSubdir ?? 'rules'}/*.${spec.rulesExt ?? 'md'}`;
+    case 'mdc':
+      return `~/${spec.rootRel}/${spec.rulesSubdir ?? 'rules'}/*.mdc`;
+    case 'block':
+      return `~/${spec.rootRel}/${spec.rulesBlockFile ?? 'AGENTS.md'} 里的团队区块`;
+    case 'none':
+      return '不下发（该工具没有 markdown rules 载体）';
+  }
+}
+
+function rootCell(spec: ToolPathSpec): string {
+  return spec.rootEnvVar ? `${spec.label}<br>（或 \$${spec.rootEnvVar}）` : spec.label;
+}
+
+function deliveryMatrix(): string {
+  const rows = Object.values(TOOL_PATHS)
+    .map((spec) => `| ${rootCell(spec)} | \`${skillsCell(spec)}\` | \`${rulesCell(spec)}\` |`)
+    .join('\n');
+  return `| 工具 | 技能 | 规范 |\n|---|---|---|\n${rows}`;
+}
 
 export function teamReadme(repo: string, branch: string): string {
   return `# 团队 AI 资产仓库
@@ -71,15 +105,10 @@ ejdrone push --skill ~/.claude/skills/my-skill
 
 只投递**你选定的工具** × **你订阅的角色**两份交集，前端不会收到运维的技能：
 
-| 工具 | 技能 | 规范 |
-|---|---|---|
-| Claude Code | \`~/.claude/skills/\` | \`~/.claude/rules/*.md\` |
-| Qoder CN | \`~/.qoder-cn/skills/\` | \`~/.qoder-cn/rules/*.md\` |
-| Cursor | \`~/.cursor/skills/\` | \`~/.cursor/rules/*.mdc\` |
-| Codex | \`~/.codex/skills/\` | \`~/.codex/AGENTS.md\` 里的团队区块 |
-| DeepSeek Harness | \`~/.dsh/skills/\` | \`~/.dsh/AGENTS.md\` 里的团队区块 |
+${deliveryMatrix()}
 
 区块形式的工具里，标记外的内容是你自己的，工具从不改动；卸载时也只撤掉我们那一段。
+未核对的落点由 \`ejdrone doctor\` 点名（它只报你真的勾选了的工具），工具升级改了目录时先看它。
 
 ## 遇到问题
 

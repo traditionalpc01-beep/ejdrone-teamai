@@ -108,25 +108,46 @@ ejdrone push --skill ~/.claude/skills/team-release --ns devops
 
 ## 支持的工具
 
-| 工具 | skills | rules |
-|---|---|---|
-| Claude Code | `~/.claude/skills/` | `~/.claude/rules/*.md`（官方用户级载体，支持 `paths:` 按需加载） |
-| Qoder CN | `~/.qoder-cn/skills/` | `~/.qoder-cn/rules/*.md`（落点待真机核对，见下） |
-| Cursor | `~/.cursor/skills/` | `~/.cursor/rules/*.mdc` |
-| Codex | `~/.codex/skills/` | `~/.codex/AGENTS.md` 团队区块（Codex 无 markdown rules 目录） |
-| DeepSeek Harness | `$DSH_HOME/skills/`（默认 `~/.dsh`） | `$DSH_HOME/AGENTS.md` 团队区块 |
+16 个工具，全部只有 user scope。「真机核实」列是本机（macOS）逐项盘出来的，没核到的格子一律标出来，不猜。
 
-**尚未真机核实的落点**（`ejdrone doctor` 会以 WARN 逐条列出）：Qoder CN 的 rules 目录是否被读取、
-Cursor / Codex / DeepSeek Harness 的 hook 落点与事件名。这些工具升级后可能变化，
-所有路径集中在 `src/agents/paths.ts` 一张表里，改一处即可。
+| 工具 | skills | rules | 真机核实 |
+|---|---|---|---|
+| Claude Code | `~/.claude/skills/` | `~/.claude/rules/*.md`（官方用户级载体，支持 `paths:` 按需加载） | 已核 |
+| Qoder CN | `~/.qoder-cn/skills/` | `~/.qoder-cn/rules/*.md` | 部分（rules 是否被读取未证） |
+| Qoder | `~/.qoder/skills/` | `~/.qoder/rules/*.md` | 部分（rules 与 hook 未证） |
+| Cursor | `~/.cursor/skills/` | `~/.cursor/rules/*.mdc` | 未核（本机未装） |
+| Codex | `~/.codex/skills/` | `~/.codex/AGENTS.md` 团队区块（其原生 `rules/` 是命令策略目录，非 markdown） | 部分（hook 未核） |
+| GitHub Copilot CLI | `~/.copilot/skills/`（或 `$COPILOT_HOME`） | `~/.copilot/AGENTS.md` 团队区块 | 未核（本机未装） |
+| CodeBuddy | `~/.codebuddy/skills/` | — | 部分（hook 未证） |
+| WorkBuddy | `~/.workbuddy/skills/` | — | 部分（hook 未证） |
+| OpenCode | `~/.config/opencode/skills/` | `~/.config/opencode/AGENTS.md` 团队区块 | 未核（本机未装） |
+| Pi Coding Agent | `~/.pi/agent/skills/` | — | skills 已核 |
+| OpenClaw | `~/.openclaw/skills/` | — | skills 已核（hook 是 workspace 级，user scope 不做） |
+| Hermes | `~/.hermes/skills/` | — | skills 已核（`~/.hermes/hooks` 是目录，非 JSON 载体） |
+| Kiro | `~/.kiro/skills/` | — | skills 已核（SessionStart 由 agent 同步内嵌，无用户级落点） |
+| Trae | `~/.trae/skills/` | `~/.trae/rules/*.md`（原生目录） | 已核（无 hook 落点） |
+| Trae CN | `~/.trae-cn/skills/` | `~/.trae-cn/user_rules/*.md` | 部分（该目录存在但为空） |
+| DeepSeek Harness | `~/.dsh/skills/`（或 `$DSH_HOME`） | `~/.dsh/AGENTS.md` 团队区块 | 未核（本机未装） |
 
-Windows 未支持（v1 仅 macOS / Linux）。
+`—` = 该工具没有可写的 markdown rules 载体，团队规范不下发给它（宁可少投递，也不往它不读的位置硬写）。
 
-## 为什么 rules 有三种投递方式
+**未核对的落点**由 `ejdrone doctor` 点名 —— 只报你在 `init` 里勾选的工具，没勾的折成一行提示，不刷屏。
+所有路径与核实状态集中在 `src/agents/paths.ts` 一张表里，某工具升级改了目录只改那一行。
 
-各工具读取团队规范的位置完全不同：Claude / Qoder 是 rules 目录逐文件、Cursor 是 `.mdc`（要 frontmatter），
-Codex 与 DeepSeek Harness 根本没有 markdown rules 目录，只能往它们的 `AGENTS.md` 里插一个
-`<!-- [ejdrone:team-rules:start] -->` 标记区块。**标记外的你自己的内容永不被动。**
+Windows 未支持（v1 仅 macOS / Linux；2.0 的 M10 处理）。
+
+## 为什么 rules 有四种投递方式
+
+各工具读取团队规范的位置完全不同，16 个工具里分了四种：
+
+- **rulesdir**（Claude / Qoder CN / Qoder / Trae / Trae CN）：工具的 rules 目录，逐文件、原文照抄
+- **mdc**（Cursor）：`.mdc` 格式，需要重写 frontmatter（`description` / `globs` / `alwaysApply`）
+- **block**（Codex / GitHub Copilot CLI / OpenCode / DeepSeek Harness）：没有 markdown rules 载体，
+  只能往它们的 `AGENTS.md` 里插一个 `<!-- [ejdrone:team-rules:start] -->` 标记区块。**标记外的你自己的内容永不被动。**
+- **none**（CodeBuddy / WorkBuddy / Pi / OpenClaw / Hermes / Kiro）：既没有 rules 目录也没有可写的 `AGENTS.md`，
+  团队规范**不下发给它** —— 往它不读的位置硬写文件，只会留下一份没人看的副本和一个可能被误删的用户目录。
+
+模式由 `src/agents/paths.ts` 的表决定，`src/agents/common.ts` 一处按表分派；加新工具是填表，不是抄判断。
 
 ## 安全边界
 

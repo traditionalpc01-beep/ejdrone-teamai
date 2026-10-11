@@ -16,6 +16,7 @@
 | 源码直跑 CLI | `npm run dev -- --help` |
 
 - 前置：Node.js ≥ 20、本机 `git` 可用。集成用例用真实 `git init --bare` 起 origin，不许 mock。
+- **`npm run typecheck` 不覆盖 `test/`**（tsconfig 的 exclude 里有 test），测试文件的类型错误只有 vitest 跑到才暴露。改了测试就必须 `npm test`。
 - 验收线 = `npm run typecheck` + `npm test` 全绿。碰 `src/core/` 或 `src/agents/` 必须跑全量：端到端用例比单测更容易暴露投递回归。
 
 ## 硬规则
@@ -38,7 +39,13 @@
 - CLI 一律经 `runCli(argv, ctx)`：返回退出码，绝不调用 `process.exit`，也不在模块级绑定 `process.env` ——
   端到端测试靠这两条才能在同一个进程里跑多个成员。
 - 适配器与状态层函数显式接收 `home: string, env: NodeJS.ProcessEnv`，不在函数外读 `process.env.HOME` / `homedir()`。
-- rules 的三种落点分走 `src/agents/rulesdir.ts`、`mdc.ts`、`block.ts` 三个 helper，不要在单个适配器里塞 if-else。
+- 2.0 有 16 个适配器，公共行为全在 `src/agents/common.ts`；适配器文件只做「声明 id + 组装」，
+  **不许出现 rulesMode / hook 的 if 判断** —— rules 的四种模式（rulesdir / mdc / block / none）在
+  `planRulesFor` 里按表分派一处，模式实现分别在 `rulesdir.ts`、`mdc.ts`、`block.ts`。
+- 新增一个工具 = 在 `paths.ts` 填一行表 + 建 `src/agents/<id>.ts` + 在 `index.ts` 按表顺序注册 +
+  `test/agents/<id>.test.ts` 里 `describeAdapter(<id>Adapter)` 拿公共六项、再补该工具的特例。
+  `adapters.test.ts` 的 tripwire 会拦住忘记注册的情况。
+- 投递矩阵不手写：`src/cli/team-readme.ts` 从 `TOOL_PATHS` 生成，改表即改文档，防止两处漂移。
 - block 模式两个坑（注释在 `types.ts`，改 `core/apply.ts` 或 `cli/delivery.ts` 前先读）：适配器要把自己的合成 key
   `rules:team-rules-block` 放进 `activeResources`，否则每次 pull 误删区块；某 kind 停发时看 `Resolution.haltedKinds`
   整体跳过，因为空 writes 在 block 模式等于"清空区块"。

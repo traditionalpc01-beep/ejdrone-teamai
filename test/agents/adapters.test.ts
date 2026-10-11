@@ -78,9 +78,8 @@ describe('registry / index', () => {
   const tableIds = Object.keys(TOOL_PATHS);
   const registered = adapters.map((a) => a.id);
 
-  it('每个已注册适配器都在 paths.ts 里有表项，且注册顺序与表顺序一致', () => {
-    for (const id of registered) expect(tableIds).toContain(id);
-    expect(registered).toEqual(tableIds.filter((id) => registered.includes(id)));
+  it('paths.ts 里每个表项都有对应适配器，且注册顺序与表顺序一致', () => {
+    expect(registered).toEqual(tableIds);
   });
 
   it('AGENT_IDS 只包含已注册的工具（paths.ts 允许有还没写适配器的表项）', () => {
