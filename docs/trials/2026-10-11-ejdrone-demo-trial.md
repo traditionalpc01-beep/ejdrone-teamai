@@ -98,4 +98,5 @@ rm -rf ~/.ejdrone                      # 清状态目录
 
 - 代码仓库：`ejdrone-skills`（含本记录）
 - 团队资产仓库 `ejdrone-teamai-demo`：`manifest/roles.yaml`、`skills/shoot/photo-shoot-organizer/SKILL.md`、`rules/shoot/shoot-delivery-convention.md`，PR #1 与 PR #2 均已合入 main
-- 本轮代码改动：`src/git/repo.ts`、`src/cli/mr.ts`、`src/core/apply.ts`、`src/core/resources.ts` + 6 条新用例（**尚未提交**）
+- 本轮代码改动：`src/git/repo.ts`、`src/cli/mr.ts`、`src/core/apply.ts`、`src/core/resources.ts` + 6 条新用例，
+  已提交 `7a78155` 并推到 ejdrone-skills 的 main
