@@ -19,6 +19,14 @@ import { isAbsolute, join } from 'node:path';
 
 export type RulesMode = 'rulesdir' | 'mdc' | 'block' | 'none';
 
+/**
+ * MCP 条目的四种目标形态（2.0 计划 §3.4）。`format` 只到 json/toml 为止 ——
+ * merge.ts 与 PlannedWrite.merge 的冻结契约只认这两种；同是 json，
+ * Claude 兼容形、opencode 的 mcp 键、copilot 的 tools 允许列表条目形状各不相同，
+ * 差异全靠这个 style 字段在**表里**点名，mcpfmt 按它分派，适配器与 mcpfmt 都不许按工具 id 猜。
+ */
+export type McpTargetStyle = 'json-mcpServers' | 'toml-codex' | 'json-opencode' | 'json-copilot';
+
 export interface ToolPathSpec {
   id: string;
   label: string;
@@ -40,9 +48,16 @@ export interface ToolPathSpec {
    * MCP 落点（M6）：成员已在用的共享配置文件，投递是**条目级合并**而非整文件覆写。
    * `file` 相对工具根；`homeFile` 相对 HOME —— 只有 Claude 需要（`~/.claude.json` 不在 `.claude` 下）。
    * `pointer` 指向条目表：JSON 是键路径，TOML 是表名（`mcp_servers` → `[mcp_servers.<name>]`）。
+   * `style` 是条目文本的四种目标形态之一（见 McpTargetStyle）；`format` 只喂 merge 引擎（json|toml）。
    * 缺席 = 该工具没有用户级 MCP 落点，`mcp/` 内容不下发给它。
    */
-  mcpTarget?: { format: 'json' | 'toml'; file?: string; homeFile?: string; pointer: string[] };
+  mcpTarget?: {
+    format: 'json' | 'toml';
+    style: McpTargetStyle;
+    file?: string;
+    homeFile?: string;
+    pointer: string[];
+  };
   /** 待真机确认的说明 */
   probe?: string;
 }
@@ -58,7 +73,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rulesExt: 'md',
     hookFile: 'settings.json',
     hookEvent: 'SessionStart',
-    mcpTarget: { format: 'json', homeFile: '.claude.json', pointer: ['mcpServers'] },
+    mcpTarget: { format: 'json', style: 'json-mcpServers', homeFile: '.claude.json', pointer: ['mcpServers'] },
     probe: '已真机核对(2026-10-11 M5 试验)：~/.claude/skills 投递正常、settings.json 里用户已有的 SessionEnd/Stop 条目不被动、我们那条 SessionStart 幂等；卸载后 settings.json 逐字节回到原样（缩进与结尾换行跟随原文件）。MCP 落点已真机核对：~/.claude.json 顶层就有 mcpServers 表（本机有 4 条成员自己的 server）。rules 目录名沿用投递矩阵（真机无原生 rules 目录，由本工具创建）',
   },
   'qoder-cn': {
@@ -71,7 +86,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rulesExt: 'md',
     hookFile: 'settings.json',
     hookEvent: 'SessionStart',
-    mcpTarget: { format: 'json', file: 'settings.json', pointer: ['mcpServers'] },
+    mcpTarget: { format: 'json', style: 'json-mcpServers', file: 'settings.json', pointer: ['mcpServers'] },
     probe: '已真机核对(2026-10-11 M5 试验)：投递到 ~/.qoder-cn/skills 的技能真的被 Qoder CN 读到了 —— 新会话的可用技能列表里出现了仓库刚投递的 trial-note/trial-ns，属内容级证据（1.0 只核到目录存在）。settings.json 的 hook 条目写入/卸载均正常（是否被 Qoder 触发仍未证）。MCP 落点已真机核对：~/.qoder-cn/settings.json 顶层有 mcpServers（本机有一条 GitHub）。未核对：rules 目录是否被读取',
   },
   cursor: {
@@ -84,7 +99,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rulesExt: 'mdc',
     hookFile: 'hooks.json',
     hookEvent: 'sessionStart',
-    mcpTarget: { format: 'json', file: 'mcp.json', pointer: ['mcpServers'] },
+    mcpTarget: { format: 'json', style: 'json-mcpServers', file: 'mcp.json', pointer: ['mcpServers'] },
     probe: '本机未安装 Cursor，未核对，保留 PROBE：rootRel/.cursor、skills 落点与 hook 事件名（随版本变化）均待真机确认；installHook 采取照表尝试、任何失败降级为 installed:false。MCP 落点 ~/.cursor/mcp.json 照 teamai 文档，未核',
   },
   codex: {
@@ -96,7 +111,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rulesBlockFile: 'AGENTS.md',
     hookFile: 'hooks.json',
     hookEvent: 'SessionStart',
-    mcpTarget: { format: 'toml', file: 'config.toml', pointer: ['mcp_servers'] },
+    mcpTarget: { format: 'toml', style: 'toml-codex', file: 'config.toml', pointer: ['mcp_servers'] },
     probe: '已真机核对(2026-10-11)：~/.codex/skills 与 AGENTS.md 均存在（skills 与 block 落点确认）。注：真机另有原生 ~/.codex/rules 目录，但投递矩阵规定 codex 走 AGENTS.md 区块。MCP 落点已真机核对：~/.codex/config.toml 用 [mcp_servers.<name>] 表（本机已有成员手写若干条，含 .env 子表）。hook 落点 hooks.json 未核对（真机只见 config.toml，无 hooks.json），保留 PROBE',
   },
   dsh: {
@@ -121,7 +136,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rulesExt: 'md',
     hookFile: 'settings.json',
     hookEvent: 'SessionStart',
-    mcpTarget: { format: 'json', file: 'mcp.json', pointer: ['mcpServers'] },
+    mcpTarget: { format: 'json', style: 'json-mcpServers', file: 'mcp.json', pointer: ['mcpServers'] },
     probe: '已真机核对(2026-10-11)：~/.qoder/skills 存在，skills 落点确认；MCP 落点已真机核对 —— ~/.qoder/mcp.json 顶层就是 mcpServers（空表，形状与 Claude 兼容）。未核对：~/.qoder 下无 rules 目录（由本工具创建，Qoder 是否读取未知）、settings.json 存在但没有 hooks 键（Qoder 国际版是否按 Claude 兼容形读 SessionStart 待真机）',
   },
   copilot: {
@@ -132,7 +147,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     skillsSubdir: 'skills',
     rulesMode: 'block',
     rulesBlockFile: 'AGENTS.md',
-    mcpTarget: { format: 'json', file: 'mcp-config.json', pointer: ['mcpServers'] },
+    mcpTarget: { format: 'json', style: 'json-copilot', file: 'mcp-config.json', pointer: ['mcpServers'] },
     probe: '本机未安装 GitHub Copilot CLI，未核对，保留 PROBE：rootRel ~/.copilot 与 COPILOT_HOME 覆盖照 teamai 文档；skills 子目录、AGENTS.md 区块均未核。MCP 落点 $COPILOT_HOME/mcp-config.json 照 teamai 文档，其条目要带 tools:["*"] 且 stdio 写成 type:"local"，未核。无用户级 hook 落点（teamai 只记载项目级 .github/hooks/，且 Copilot 不读 ~/.claude/settings.json），故不设 hookFile',
   },
   codebuddy: {
@@ -143,7 +158,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rulesMode: 'none',
     hookFile: 'settings.json',
     hookEvent: 'SessionStart',
-    mcpTarget: { format: 'json', file: '.mcp.json', pointer: ['mcpServers'] },
+    mcpTarget: { format: 'json', style: 'json-mcpServers', file: '.mcp.json', pointer: ['mcpServers'] },
     probe: '已真机核对(2026-10-11)：~/.codebuddy/skills 存在且含工具自家 skill 目录，skills 落点确认。待真机：该机器上没有 ~/.codebuddy/settings.json，hookFile/hookEvent 照 CodeBuddy 的 Claude 兼容血统推断；无原生 markdown rules 目录，rules 置 none。MCP 照 teamai 记载 CodeBuddy 只读三个文件里的第一个（.mcp.json → mcp.json → ~/.codebuddy.json），我们只写首选 ~/.codebuddy/.mcp.json，那套"读哪个看先后"的搬迁逻辑不做，留 PROBE',
   },
   workbuddy: {
@@ -154,7 +169,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rulesMode: 'none',
     hookFile: 'settings.json',
     hookEvent: 'SessionStart',
-    mcpTarget: { format: 'json', file: 'mcp.json', pointer: ['mcpServers'] },
+    mcpTarget: { format: 'json', style: 'json-mcpServers', file: 'mcp.json', pointer: ['mcpServers'] },
     probe: '已真机核对(2026-10-11)：~/.workbuddy/skills 存在，skills 落点确认；MCP 落点已真机核对 —— ~/.workbuddy/mcp.json 顶层是 mcpServers（空表）。未核对：~/.workbuddy/settings.json 存在但只有 app 状态键（enabledPlugins/claw/sandbox/skillOverrides…），无 hooks 键，是否按 Claude 兼容形读 hook 待真机；无 markdown rules 目录，rules 置 none',
   },
   opencode: {
@@ -164,7 +179,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     skillsSubdir: 'skills',
     rulesMode: 'block',
     rulesBlockFile: 'AGENTS.md',
-    mcpTarget: { format: 'json', file: 'opencode.json', pointer: ['mcp'] },
+    mcpTarget: { format: 'json', style: 'json-opencode', file: 'opencode.json', pointer: ['mcp'] },
     probe: '本机未安装 OpenCode（无 ~/.config/opencode），未核对，保留 PROBE：rootRel 用多级 ~/.config/opencode（照 teamai 的 opencode.json 位置）；skills 子目录与 AGENTS.md 区块均未核。MCP 照 teamai 落在共享 opencode.json 的 mcp 键（stdio 写成 type:"local"，远程写 type:"remote"），未核。无用户级 JSON hook 落点可复用我们的 upsertHook 形状，故不设 hookFile',
   },
   pi: {
@@ -173,7 +188,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rootRel: '.pi',
     skillsSubdir: 'agent/skills',
     rulesMode: 'none',
-    mcpTarget: { format: 'json', file: 'agent/mcp.json', pointer: ['mcpServers'] },
+    mcpTarget: { format: 'json', style: 'json-mcpServers', file: 'agent/mcp.json', pointer: ['mcpServers'] },
     probe: '已真机核对(2026-10-11)：~/.pi/agent/skills 存在，skills 落点（多级）确认。rules 置 none：~/.pi 下无 rules 目录也无 AGENTS.md。MCP 落点 ~/.pi/agent/mcp.json 照 teamai 文档，本机该文件不存在，未核。不设 hook：teamai 记载 Pi 仅支持其内置生命周期桥接，不接受团队自定义 hook',
   },
   openclaw: {
@@ -190,7 +205,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rootRel: '.kiro',
     skillsSubdir: 'skills',
     rulesMode: 'none',
-    mcpTarget: { format: 'json', file: 'settings/mcp.json', pointer: ['mcpServers'] },
+    mcpTarget: { format: 'json', style: 'json-mcpServers', file: 'settings/mcp.json', pointer: ['mcpServers'] },
     probe: '已真机核对(2026-10-11)：~/.kiro/skills 存在且含工具自家 skill 目录，skills 落点确认。不设 hook：teamai 记载 Kiro 的 SessionStart 由 agent 同步以 hooks.agentSpawn 内嵌，只存在于已同步的 agent 中，无用户级 JSON 落点。rules 置 none（~/.kiro 下无 rules/ 也无 AGENTS.md）。MCP 落点 ~/.kiro/settings/mcp.json 照 Kiro 官方文档与 teamai 表，本机该目录不存在，未核',
   },
   trae: {
@@ -263,18 +278,26 @@ export function hookTarget(id: string, home: string, env: NodeJS.ProcessEnv): { 
 /**
  * MCP 落点（M6）。返回 null = 该工具没有用户级 MCP 配置，团队 server 不下发给它。
  * `homeFile` 走 HOME 而不是工具根：Claude 的 `~/.claude.json` 就不在 `~/.claude/` 下。
+ * `style` 是给 mcpfmt 的条目形态分派用；`format`/`pointer` 原样进 PlannedWrite.merge。
  */
 export function mcpTargetPath(
   id: string,
   home: string,
   env: NodeJS.ProcessEnv,
-): { path: string; format: 'json' | 'toml'; pointer: string[] } | null {
+): { path: string; format: 'json' | 'toml'; style: McpTargetStyle; pointer: string[] } | null {
   const spec = spec_(id);
   const target = spec.mcpTarget;
   if (!target) return null;
-  if (target.homeFile) return { path: join(home, target.homeFile), format: target.format, pointer: target.pointer };
+  if (target.homeFile) {
+    return { path: join(home, target.homeFile), format: target.format, style: target.style, pointer: target.pointer };
+  }
   if (!target.file) return null;
-  return { path: join(toolRoot(id, home, env), target.file), format: target.format, pointer: target.pointer };
+  return {
+    path: join(toolRoot(id, home, env), target.file),
+    format: target.format,
+    style: target.style,
+    pointer: target.pointer,
+  };
 }
 
 function spec_(id: string): ToolPathSpec {

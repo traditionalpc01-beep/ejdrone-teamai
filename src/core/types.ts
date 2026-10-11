@@ -245,8 +245,16 @@ export interface AgentAdapter {
   /**
    * MCP server → 该工具原生 MCP 配置里的受管条目（条目级合并，见 PlannedWrite.merge）。
    * 可选：paths.ts 没给 mcpTarget 的工具不实现它，delivery 按"没有该能力"处理。
+   * `note` 是给点名的出口（缺变量 / 缺可执行 / 不支持的 transport 而跳过的 server）：
+   * "跳过并点名"是红线，静默跳过会让成员以为团队下发了而自己没拿到。
+   * 只允许传人类可读的名字，已解析的密钥值不得进入任何 note。
    */
-  planMcp?(servers: Resource[], home: string, env: NodeJS.ProcessEnv): PlannedWrite[];
+  planMcp?(
+    servers: Resource[],
+    home: string,
+    env: NodeJS.ProcessEnv,
+    note?: (message: string) => void,
+  ): PlannedWrite[];
 
   /** 该绝对路径是否属于本适配器管辖（用于删除与 uninstall） */
   ownsPath(path: string, home: string, env: NodeJS.ProcessEnv): boolean;

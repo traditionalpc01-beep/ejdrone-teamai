@@ -2,16 +2,28 @@ import { existsSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 
 import {
+  mcpPayload,
   resourceKey,
   type HookInstallOutcome,
   type PlannedWrite,
   type Resource,
 } from '../core/types.js';
 import { removeHook, upsertHook } from '../hooks.js';
-import { hookTarget, rulesBlockPath, rulesRoot, skillsRoot, TOOL_PATHS, toolRoot, type ToolPathSpec } from './paths.js';
+import { resolveMcpResources } from '../core/mcp.js';
+import {
+  hookTarget,
+  mcpTargetPath,
+  rulesBlockPath,
+  rulesRoot,
+  skillsRoot,
+  TOOL_PATHS,
+  toolRoot,
+  type ToolPathSpec,
+} from './paths.js';
 import { planRulesBlock } from './block.js';
 import { planRulesMdc } from './mdc.js';
 import { planRulesDir } from './rulesdir.js';
+import { mcpMergeResourceKey, renderMcpEntries } from './mcpfmt.js';
 
 /**
  * 16 个适配器的公共层。
@@ -90,6 +102,56 @@ export function planRulesFor(
       // 该工具没有可写的 markdown rules 载体（见 paths.ts 表注释），规则不下发给它。
       return [];
   }
+}
+
+/**
+ * MCP 投递的分派同样只此一处（同 planRulesFor 的做法，适配器一行组装）：
+ *  - paths.ts 没给 mcpTarget → 空数组（该工具不支持 MCP 下发）；
+ *  - 有 → **恒发恰好一条 merge write**（entries 可为空）。空 entries 的那条就是
+ *    "最后一个 server 停投也要清掉账本与成员条目"的指令，缺了它孤儿条目永远留在成员文件里。
+ * 条目文本约定、四种形态与 requires 探测在 mcpfmt.ts；点名（缺变量 / 缺可执行 /
+ * codex 不支持 sse 的 server）通过 `note` 交给调用方 —— 只含 server 名、变量名、可执行名，绝不含已解析值。
+ * 必须能到达用户：静默跳过会让成员以为团队下发了而自己没拿到。
+ */
+export function planMcpFor(
+  id: string,
+  servers: Resource[],
+  home: string,
+  env: NodeJS.ProcessEnv,
+  note?: (message: string) => void,
+): PlannedWrite[] {
+  const target = mcpTargetPath(id, home, env);
+  if (!target) return [];
+  const label = specOf(id).label;
+  const warnings: string[] = [];
+  // tools: 缺省 = 所有支持 MCP 的工具；先按目标工具过滤再解析 ${VAR}，
+  // 免得发给别的工具的 server 在本工具的点名里刷屏。
+  const applicable = servers.filter((r) => {
+    const { tools } = mcpPayload(r);
+    return !tools || tools.includes(id);
+  });
+  const { servers: resolved, skipped } = resolveMcpResources(applicable, env);
+  for (const s of skipped) {
+    warnings.push(`${label}：环境变量未定义 ${s.missing.map((v) => `\${${v}}`).join('、')}，server "${s.name}" 本次跳过`);
+  }
+  const entries = renderMcpEntries({
+    style: target.style,
+    pointer: target.pointer,
+    servers: resolved,
+    env,
+    toolLabel: label,
+    warnings,
+  });
+  if (note) for (const message of warnings) note(message);
+  return [
+    {
+      path: target.path,
+      // merge 投递的 content 恒为空（§3.3）：文件归成员，apply 层只按 entries 做条目级合并。
+      content: '',
+      resource: mcpMergeResourceKey(id),
+      merge: { format: target.format, pointer: target.pointer, entries },
+    },
+  ];
 }
 
 /**

@@ -109,6 +109,28 @@ export function describeAdapter(adapter: AgentAdapter): void {
       expect(w.region).toBeUndefined();
     });
 
+    it('planMcp：有 mcpTarget 的工具恒发恰好一条 merge write（entries 可为空对象）；没有则不实现 planMcp', () => {
+      if (!spec.mcpTarget) {
+        expect(adapter.planMcp).toBeUndefined();
+        return;
+      }
+      expect(typeof adapter.planMcp).toBe('function');
+      // 空 server 列表也必须产出这一条 —— 它是"最后一个 server 停投也能清掉"的前提；
+      // 缺了它，账本与成员文件里会留下永远没人认领的孤儿条目。
+      const writes = adapter.planMcp!([], home, HOME_ENV);
+      expect(writes).toHaveLength(1);
+      const w = writes[0] as PlannedWrite;
+      expect(w.resource).toBe(`mcp:${id}-merge`);
+      expect(w.content).toBe('');
+      expect(w.region).toBeUndefined();
+      expect(w.merge).toEqual({ format: spec.mcpTarget.format, pointer: spec.mcpTarget.pointer, entries: {} });
+      // 路径独立重算：homeFile 锚 HOME，file 锚工具根（不复用 paths.ts helper）。
+      const expectedPath = spec.mcpTarget.homeFile
+        ? join(home, spec.mcpTarget.homeFile)
+        : join(expectedRoot(home), spec.mcpTarget.file ?? '');
+      expect(w.path).toBe(expectedPath);
+    });
+
     it('ownsPath：管 skills 子树与 rules 子树，绝不管工具根本身或 block 文件', () => {
       expect(adapter.ownsPath(join(expectedRoot(home), spec.skillsSubdir, 'a', 'SKILL.md'), home, HOME_ENV)).toBe(true);
       if (spec.rulesSubdir) {

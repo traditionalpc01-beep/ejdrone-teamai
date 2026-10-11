@@ -71,14 +71,23 @@ export function buildDelivery(ctx: CliContext, config: Config, snapshot: Snapsho
 
   const writes: PlannedWrite[] = [];
   const halted = new Set(resolution.haltedKinds);
+
+  // mcp.yaml 文件级解析失败 → mcp 整体停发。绝不能当成"仓库里没有 server"：
+  // 那样 apply 会把每个成员已装的受管条目全删掉（一个拼错的 `server:` 就够引发全员事故）。
+  if (snapshot.mcpFileError !== null && !halted.has('mcp')) {
+    halted.add('mcp');
+    notes.push(`mcp 本次停发（已装内容不动）：${snapshot.mcpFileError}`);
+  }
+
   for (const adapter of adapters) {
     // 停发 ≠ 清空：block 模式适配器拿到空数组会写出一条"清空区块"的投递，
     // 那会把已装的 Codex / DSH 团队区块抹掉。冲突时必须整个跳过。
     if (!halted.has('skills')) writes.push(...adapter.planSkills(resolution.kinds.skills, ctx.home, ctx.env));
     if (!halted.has('rules')) writes.push(...adapter.planRules(resolution.kinds.rules, ctx.home, ctx.env));
     // MCP 能力是可选项：表里没给 mcpTarget 的工具不实现 planMcp，跳过即可。
+    // note 把"因缺变量/缺可执行/不支持 transport 而跳过"带到用户眼前 —— 静默跳过会被当成"团队没下发"。
     if (!halted.has('mcp') && adapter.planMcp) {
-      writes.push(...adapter.planMcp(resolution.kinds.mcp, ctx.home, ctx.env));
+      writes.push(...adapter.planMcp(resolution.kinds.mcp, ctx.home, ctx.env, (message) => notes.push(message)));
     }
   }
 
@@ -90,7 +99,9 @@ export function buildDelivery(ctx: CliContext, config: Config, snapshot: Snapsho
     activeResources: [...new Set(writes.map((w) => w.resource))],
     isManaged,
     conflicts: resolution.conflicts,
-    haltedKinds: resolution.haltedKinds,
+    // 必须是实际生效的停发集合（含 mcpFileError 那一条），不是裁决原始值：
+    // activeResourcesWithConflictHold 靠它把已记账的 mcp 条目保住，否则停发会变成删除。
+    haltedKinds: [...halted],
     notes,
     adapters,
     kinds: resolution.kinds,

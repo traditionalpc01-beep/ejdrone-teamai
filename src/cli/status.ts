@@ -44,7 +44,15 @@ export async function statusCommand(ctx: CliContext): Promise<number> {
   if (warning) ctx.out(`提示：${warning}`);
   const audit = auditLedger(ledger);
 
-  const repoKeys = new Set(delivery.activeResources);
+  // 空条目的 merge write（mcp 的 `mcp:<tool>-merge` 恒发那一条）是**清账指令**，不是"仓库有待投内容"：
+  // 仓库没有可投 server 时它也每次都在 activeResources 里，若不滤掉，status 会永远显示一条
+  // pull 完也消不掉的"落后"（apply 侧空 delivered 不落账，两边永远对不齐）。真正有 server 要投时
+  // entries 非空，照常计入落后。
+  const repoKeys = new Set(
+    delivery.writes
+      .filter((w) => !(w.merge && Object.keys(w.merge.entries).length === 0))
+      .map((w) => w.resource),
+  );
   const deliveredKeys = new Set(ledger.entries.map((entry) => entry.resource));
   const behind = [...repoKeys].filter((key) => !deliveredKeys.has(key));
 

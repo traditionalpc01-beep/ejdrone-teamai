@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { copilotAdapter } from '../../src/agents/copilot.js';
 import { describeAdapter, SKILL_NAME, skillFixture } from './suite.js';
+import type { McpServerDef, Resource } from '../../src/core/types.js';
 
 /** 公共六项（id/label、detect、planSkills、planRules block、ownsPath、无 hook 降级）。 */
 describeAdapter(copilotAdapter);
@@ -70,5 +71,40 @@ describe('copilot: COPILOT_HOME 覆盖（只认绝对路径）', () => {
     mkdirSync(join(home, '.copilot'), { recursive: true });
     const writes = copilotAdapter.planSkills([skillFixture()], home, { COPILOT_HOME: '   ' });
     expect(writes.map((w) => w.path)).toContain(join(home, '.copilot', 'skills', SKILL_NAME, 'SKILL.md'));
+  });
+});
+
+/**
+ * 特例：Copilot 的 MCP 条目没有 tools 允许列表就**不加载**该 server，
+ * 我们投的一律全量放行 ["*"]（形状差异收在 mcpfmt，分派仍走 paths.ts 的 style）。
+ */
+describe('copilot: planMcp 条目必须带 tools:["*"]', () => {
+  let home: string;
+  let copilotHome: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'ejdrone-copilot-mcp-'));
+    copilotHome = mkdtempSync(join(tmpdir(), 'ejdrone-copilot-mcp-root-'));
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(copilotHome, { recursive: true, force: true });
+  });
+
+  it('stdio → type:"local" + 单条 command + tools:["*"]，落点 COPILOT_HOME/mcp-config.json', () => {
+    const server: Resource = {
+      kind: 'mcp',
+      namespace: '',
+      name: 'fetch',
+      files: {},
+      payload: { transport: 'stdio', command: 'npx', args: ['-y', 'mcp-fetch'] },
+    };
+    const env = { COPILOT_HOME: copilotHome };
+    const writes = copilotAdapter.planMcp?.([server], home, env);
+    expect(writes).toHaveLength(1);
+    const w = writes?.[0];
+    expect(w?.path).toBe(join(copilotHome, 'mcp-config.json'));
+    expect(w?.resource).toBe('mcp:copilot-merge');
+    expect(w?.merge?.pointer).toEqual(['mcpServers']);
+    expect(w?.merge?.entries['fetch']).toBe('{"type":"local","command":"npx -y mcp-fetch","tools":["*"]}');
   });
 });
