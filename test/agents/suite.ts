@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { BLOCK_RESOURCE_KEY } from '../../src/agents/block.js';
-import { registry } from '../../src/agents/index.js';
 import { TOOL_PATHS } from '../../src/agents/paths.js';
 import { HOOK_COMMAND_MARKER } from '../../src/hooks.js';
 import type { AgentAdapter, PlannedWrite, Resource } from '../../src/core/types.js';
@@ -47,21 +46,17 @@ function specOf(id: string) {
   return spec;
 }
 
-function adapterOf(id: string): AgentAdapter {
-  const adapter = registry().byId(id);
-  if (!adapter) throw new Error(`describeAdapter: ${id} 在 paths.ts 有表项但未注册适配器`);
-  return adapter;
-}
+/**
+ * 接收适配器实例而不是 id：M5 分批落地时，新适配器还没进 index.ts 的注册表，
+ * 也要能先跑这套断言。注册表版本由 suite.test.ts 遍历 AGENT_IDS 覆盖。
+ */
+export function describeAdapter(adapter: AgentAdapter): void {
+  const id = adapter.id;
+  const spec = specOf(id);
+  /** 独立重算一遍期望路径（不复用 paths.ts 的 helper，否则测了个寂寞）。 */
+  const expectedRoot = (home: string): string => join(home, spec.rootRel);
 
-/** 独立重算一遍期望路径（不复用 paths.ts 的 helper，否则测了个寂寞）。 */
-function expectedRoot(id: string, home: string): string {
-  return join(home, specOf(id).rootRel);
-}
-
-export function describeAdapter(id: string): void {
   describe(`adapter ${id}`, () => {
-    const spec = specOf(id);
-    const adapter = adapterOf(id);
     let home: string;
 
     beforeEach(() => {
@@ -76,13 +71,13 @@ export function describeAdapter(id: string): void {
 
     it('detect：根目录不在则 false，存在则 true', () => {
       expect(adapter.detect(home, HOME_ENV)).toBe(false);
-      mkdirSync(expectedRoot(id, home), { recursive: true });
+      mkdirSync(expectedRoot(home), { recursive: true });
       expect(adapter.detect(home, HOME_ENV)).toBe(true);
     });
 
     it('planSkills：每个文件一条 write，落在 <root>/<skillsSubdir>/<name>/ 下', () => {
       const writes = adapter.planSkills([skillFixture()], home, HOME_ENV);
-      const base = join(expectedRoot(id, home), spec.skillsSubdir, SKILL_NAME);
+      const base = join(expectedRoot(home), spec.skillsSubdir, SKILL_NAME);
       expect(writes).toHaveLength(2);
       const byPath = new Map(writes.map((w) => [w.path, w]));
       expect(byPath.get(join(base, 'SKILL.md'))?.content).toBe('# Demo\nskill body\n');
@@ -102,35 +97,35 @@ export function describeAdapter(id: string): void {
       expect(writes).toHaveLength(1);
       const w = writes[0] as PlannedWrite;
       if (spec.rulesMode === 'block') {
-        expect(w.path).toBe(join(expectedRoot(id, home), spec.rulesBlockFile));
+        expect(w.path).toBe(join(expectedRoot(home), spec.rulesBlockFile));
         expect(w.resource).toBe(BLOCK_RESOURCE_KEY);
         expect(w.region).toBeDefined();
         expect(w.content).toContain('# Code Style');
         return;
       }
       const ext = spec.rulesMode === 'mdc' ? 'mdc' : (spec.rulesExt ?? 'md');
-      expect(w.path).toBe(join(expectedRoot(id, home), spec.rulesSubdir ?? '', `${RULE_NAME}.${ext}`));
+      expect(w.path).toBe(join(expectedRoot(home), spec.rulesSubdir ?? '', `${RULE_NAME}.${ext}`));
       expect(w.resource).toBe(`rules:${RULE_NAME}`);
       expect(w.region).toBeUndefined();
     });
 
     it('ownsPath：管 skills 子树与 rules 子树，绝不管工具根本身或 block 文件', () => {
-      expect(adapter.ownsPath(join(expectedRoot(id, home), spec.skillsSubdir, 'a', 'SKILL.md'), home, HOME_ENV)).toBe(true);
+      expect(adapter.ownsPath(join(expectedRoot(home), spec.skillsSubdir, 'a', 'SKILL.md'), home, HOME_ENV)).toBe(true);
       if (spec.rulesSubdir) {
-        expect(adapter.ownsPath(join(expectedRoot(id, home), spec.rulesSubdir, 'x.md'), home, HOME_ENV)).toBe(true);
+        expect(adapter.ownsPath(join(expectedRoot(home), spec.rulesSubdir, 'x.md'), home, HOME_ENV)).toBe(true);
       }
       if (spec.rulesBlockFile) {
-        expect(adapter.ownsPath(join(expectedRoot(id, home), spec.rulesBlockFile), home, HOME_ENV)).toBe(false);
+        expect(adapter.ownsPath(join(expectedRoot(home), spec.rulesBlockFile), home, HOME_ENV)).toBe(false);
       }
       // 根本身与别人的目录都不管
-      expect(adapter.ownsPath(expectedRoot(id, home), home, HOME_ENV)).toBe(false);
+      expect(adapter.ownsPath(expectedRoot(home), home, HOME_ENV)).toBe(false);
       expect(adapter.ownsPath(join(home, '.some-other-tool', 'skills', 'a'), home, HOME_ENV)).toBe(false);
     });
 
     if (spec.hookFile && spec.hookEvent) {
       it('installHook：写入自己的条目、幂等，且不碰用户条目；uninstall 只摘自己', () => {
-        mkdirSync(expectedRoot(id, home), { recursive: true });
-        const settingsPath = join(expectedRoot(id, home), spec.hookFile as string);
+        mkdirSync(expectedRoot(home), { recursive: true });
+        const settingsPath = join(expectedRoot(home), spec.hookFile as string);
         writeFileSync(
           settingsPath,
           JSON.stringify(
