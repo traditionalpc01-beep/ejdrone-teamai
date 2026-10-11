@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 
 import { loadLedger } from '../../src/core/ledger.js';
+import { BLOCK_END, BLOCK_START } from '../../src/agents/block.js';
 import { ledgerPath } from '../../src/state.js';
 
 import { createHarness, installTools, seedTeamRepo, type Harness, type Member } from './helpers.js';
@@ -221,7 +222,6 @@ describe('uninstall', () => {
     const member = h.member('uninstall');
     await initMember(member, ['claude', 'codex']);
     member.write('.claude/rules/style.md', '# Style\n\n我自己改过的版本。\n');
-    const personal = member.read('.codex', 'AGENTS.md');
 
     const refused = await member.run(['uninstall']);
     expect(refused.code, refused.all).toBe(1);
@@ -233,14 +233,60 @@ describe('uninstall', () => {
     expect(member.exists('.claude', 'skills', 'be-deploy', 'SKILL.md')).toBe(false);
     expect(member.exists('.claude', 'rules', 'style.md')).toBe(true);
     expect(done.all).toContain('保留');
-    // 区块文件属于用户，绝不整文件删除
-    expect(member.read('.codex', 'AGENTS.md')).toBe(personal);
+    // 区块文件绝不整文件删除；未改动的团队区块被撤掉，只剩空白
+    expect(member.exists('.codex', 'AGENTS.md')).toBe(true);
+    expect(member.read('.codex', 'AGENTS.md').trim()).toBe('');
+    expect(done.all).toContain('撤掉 1 处团队区块');
     expect(member.exists('.ejdrone', 'config.yaml')).toBe(true);
     const { ledger } = loadLedger(ledgerPath(member.env));
-    // 记账被删的只剩"保留下来"的两条：AGENTS.md 区块 + 我改过的 style.md
-    expect(ledger.entries.map((e) => e.resource).sort()).toEqual(['rules:style', 'rules:team-rules-block']);
+    // 记账只剩"保留下来"的那条：我改过的 style.md（区块已随撤销清掉）
+    expect(ledger.entries.map((e) => e.resource)).toEqual(['rules:style']);
 
     const settings = JSON.parse(member.read('.claude', 'settings.json')) as { hooks?: unknown };
     expect(settings.hooks).toBeUndefined();
+  });
+
+  it('撤掉未改动的团队区块，标记外的用户内容保持原样', async () => {
+    const member = h.member('uninstall-strip');
+    installTools(member, ['codex']);
+    const own = '# 我的 Codex 说明\n\n我自己写的内容。\n';
+    member.write('.codex/AGENTS.md', own);
+    const init = await member.run(['init', h.origin, '--agent', 'codex', '--role', 'be']);
+    expect(init.code, init.all).toBe(0);
+    expect(member.read('.codex', 'AGENTS.md')).toContain(BLOCK_START);
+
+    const done = await member.run(['uninstall', '--force']);
+    expect(done.code, done.all).toBe(0);
+
+    const after = member.read('.codex', 'AGENTS.md');
+    expect(after).not.toContain('ejdrone:team-rules');
+    expect(after.trim()).toBe(own.trim());
+    expect(done.all).toContain('区块');
+    const { ledger } = loadLedger(ledgerPath(member.env));
+    expect(ledger.entries.some((e) => e.resource === 'rules:team-rules-block')).toBe(false);
+  });
+
+  it('文件里只有团队区块时留下空文件，不删用户的 AGENTS.md', async () => {
+    const member = h.member('uninstall-blank');
+    await initMember(member, ['codex']);
+    expect(member.read('.codex', 'AGENTS.md')).toContain(BLOCK_END);
+
+    const done = await member.run(['uninstall', '--force']);
+    expect(done.code, done.all).toBe(0);
+    expect(member.exists('.codex', 'AGENTS.md')).toBe(true);
+    expect(member.read('.codex', 'AGENTS.md').trim()).toBe('');
+  });
+
+  it('区块被本地改过时保留区块与记账并点名', async () => {
+    const member = h.member('uninstall-modified-block');
+    await initMember(member, ['codex']);
+    member.write('.codex/AGENTS.md', member.read('.codex', 'AGENTS.md').replace('# Style', '# Style 我改过'));
+
+    const done = await member.run(['uninstall', '--force']);
+    expect(done.code, done.all).toBe(0);
+    expect(done.all).toContain('本地已修改');
+    expect(member.read('.codex', 'AGENTS.md')).toContain('我改过');
+    const { ledger } = loadLedger(ledgerPath(member.env));
+    expect(ledger.entries.some((e) => e.resource === 'rules:team-rules-block')).toBe(true);
   });
 });

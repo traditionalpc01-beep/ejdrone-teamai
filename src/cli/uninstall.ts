@@ -1,11 +1,12 @@
-import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { registry } from '../agents/index.js';
 import { hookTarget } from '../agents/paths.js';
 import { hasHook } from '../hooks.js';
 import { hashContent, loadLedger, saveLedger } from '../core/ledger.js';
-import { BLOCK_RESOURCE_KEY } from '../agents/block.js';
+import { BLOCK_END, BLOCK_RESOURCE_KEY, BLOCK_START } from '../agents/block.js';
+import { locateRegion, normalizeInner, stripRegion } from '../core/region.js';
 import type { LedgerEntry } from '../core/types.js';
 import { configPath, ledgerPath, loadConfig, stateDir } from '../state.js';
 import type { CliContext } from './context.js';
@@ -59,6 +60,7 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
 
   const owned = (path: string): boolean => adapters.some((adapter) => adapter.ownsPath(path, ctx.home, ctx.env));
   const removed: LedgerEntry[] = [];
+  const stripped: LedgerEntry[] = [];
   const kept: Array<{ entry: LedgerEntry; reason: string }> = [];
 
   for (const entry of ledger.entries) {
@@ -66,22 +68,42 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
       removed.push(entry);
       continue;
     }
-    if (entry.resource === BLOCK_RESOURCE_KEY) {
-      kept.push({
-        entry,
-        reason: '区块文件里还有你自己的内容，请手动删掉 ejdrone:team-rules 标记之间的区块',
-      });
-      continue;
-    }
-    if (!owned(entry.path)) {
-      kept.push({ entry, reason: '不在本工具管理的目录内' });
-      continue;
-    }
     let current: string | null = null;
     try {
       current = readFileSync(entry.path, 'utf8');
     } catch {
       current = null;
+    }
+
+    if (entry.resource === BLOCK_RESOURCE_KEY) {
+      // 区块文件（AGENTS.md 一类）是用户的：只撤掉我们那对标记及其正文，绝不删整个文件。
+      // 撤掉后所剩空白就说明这文件本来只为区块而存在，留成空文件即可。
+      if (current === null) {
+        kept.push({ entry, reason: '读取失败' });
+        continue;
+      }
+      const loc = locateRegion(current, BLOCK_START, BLOCK_END);
+      if (loc === null) {
+        stripped.push(entry);
+        continue;
+      }
+      const inner = current.slice(loc.contentStart, loc.contentEnd);
+      if (hashContent(normalizeInner(inner)) !== entry.hash) {
+        kept.push({ entry, reason: '本地已修改（区块被你改过，撤掉会丢你的内容）' });
+        continue;
+      }
+      try {
+        writeFileSync(entry.path, stripRegion(current, loc), 'utf8');
+        stripped.push(entry);
+      } catch (e) {
+        kept.push({ entry, reason: `写入失败：${e instanceof Error ? e.message : String(e)}` });
+      }
+      continue;
+    }
+
+    if (!owned(entry.path)) {
+      kept.push({ entry, reason: '不在本工具管理的目录内' });
+      continue;
     }
     if (current === null || hashContent(current) !== entry.hash) {
       kept.push({ entry, reason: current === null ? '读取失败' : '本地已修改' });
@@ -91,7 +113,8 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
     removed.push(entry);
   }
 
-  const remaining = ledger.entries.filter((entry) => !removed.includes(entry));
+  const dropped = new Set<LedgerEntry>([...removed, ...stripped]);
+  const remaining = ledger.entries.filter((entry) => !dropped.has(entry));
   if (remaining.length === 0) {
     if (existsSync(file)) unlinkSync(file);
   } else {
@@ -103,7 +126,10 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
   );
 
   ctx.out('');
-  ctx.out(`清理完成：删除 ${removed.length} 个由 ejdrone 投递的文件及其记账`);
+  ctx.out(
+    `清理完成：删除 ${removed.length} 个由 ejdrone 投递的文件及其记账` +
+      (stripped.length > 0 ? `；撤掉 ${stripped.length} 处团队区块（文件与你写在标记外的内容保留）` : ''),
+  );
   for (const item of kept) ctx.out(`  保留 ${item.entry.path}（${item.entry.resource}：${item.reason}）`);
   ctx.out(`config 保留在 ${configPath(ctx.env)}；要彻底移除本工具状态请手动删除该目录，npm 包由 npm uninstall 负责`);
   return 0;

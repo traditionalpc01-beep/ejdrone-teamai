@@ -101,7 +101,7 @@ ejdrone push --skill ~/.claude/skills/team-release --ns devops
 | `roles add\|remove <id>` | 管理员改团队 manifest（走 MR） |
 | `remove <kind> <name...>` | 从**仓库**删除资源（走 MR）。不动你本地副本 —— 合入后 `pull` 会自动移除 |
 | `doctor [--json]` | 体检：config / 仓库 / manifest / hook / 投递记账 / 落点核对状态 |
-| `uninstall [--force]` | 移除 hook 与投递的文件；保留 config 和你改过的副本 |
+| `uninstall [--force]` | 移除 hook 与投递的文件；撤掉未被你改过的团队区块（AGENTS.md 本体与标记外内容保留）；保留 config 和你改过的副本 |
 
 出问题先跑 `ejdrone doctor`。`--silent` 模式下（hook 用的就是它）问题只写 `~/.ejdrone/debug.log` 且恒返回 0，不会挡住你开工具。
 

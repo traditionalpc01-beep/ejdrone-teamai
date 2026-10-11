@@ -1,6 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { hashContent, ledgerEntry } from './ledger.js';
+import {
+  appendBlock,
+  blockText,
+  hasOrphanMarker,
+  locateRegion,
+  normalizeInner,
+  replaceRegion,
+} from './region.js';
 import type {
   ApplyInput,
   ApplyOutcome,
@@ -10,53 +18,6 @@ import type {
   LedgerEntry,
   PlannedWrite,
 } from './types.js';
-
-interface Located {
-  contentStart: number;
-  contentEnd: number;
-}
-
-/** 定位第一对 start/end 标记之间的区块；标记不完整时返回 null。 */
-function locate(text: string, start: string, end: string): Located | null {
-  const a = text.indexOf(start);
-  if (a < 0) return null;
-  const nlAfterStart = text.indexOf('\n', a + start.length);
-  if (nlAfterStart < 0) return null;
-  const contentStart = nlAfterStart + 1;
-  const b = text.indexOf(end, contentStart);
-  if (b < 0) return null;
-  const endLineStart = text.lastIndexOf('\n', b - 1) + 1;
-  const contentEnd = Math.max(contentStart, endLineStart);
-  return { contentStart, contentEnd };
-}
-
-function normalizeInner(content: string): string {
-  return content.endsWith('\n') ? content : `${content}\n`;
-}
-
-/**
- * 文件里出现了标记但配不成对（用户删掉一半、或顺序反了）。
- * 此时追加新区块会让后续 locate 把中间的正文卷进区块，永久判成被本地改过并反复堆叠标记，
- * 所以宁可不动这个文件。
- */
-function hasOrphanMarker(text: string, start: string, end: string): boolean {
-  if (!text.includes(start) && !text.includes(end)) return false;
-  return locate(text, start, end) === null;
-}
-
-/** 只替换第一对标记之间的内容；标记外的字节逐字节保持。 */
-function replaceRegion(existing: string, loc: Located, content: string): string {
-  return existing.slice(0, loc.contentStart) + normalizeInner(content) + existing.slice(loc.contentEnd);
-}
-
-function blockText(start: string, end: string, content: string): string {
-  return `${start}\n${normalizeInner(content)}${end}\n`;
-}
-
-function appendBlock(existing: string, start: string, end: string, content: string): string {
-  const sep = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
-  return `${existing}${sep}${blockText(start, end, content)}`;
-}
 
 export function applyPlan(input: ApplyInput): ApplyOutcome {
   const now = input.now ?? (() => new Date());
@@ -160,7 +121,7 @@ function applyRegionWrite(
   // 只有"已存在区块"（团队删掉了最后一条 rule）才继续走下面的清空路径。
   if (write.content.trim() === '') {
     const current = existsSync(path) ? readFileSync(path, 'utf8') : '';
-    if (locate(current, start, end) === null) return;
+    if (locateRegion(current, start, end) === null) return;
   }
 
   if (!existsSync(path)) {
@@ -172,7 +133,7 @@ function applyRegionWrite(
   }
 
   const existing = readFileSync(path, 'utf8');
-  const loc = locate(existing, start, end);
+  const loc = locateRegion(existing, start, end);
 
   if (loc === null && hasOrphanMarker(existing, start, end)) {
     result.kept.push({
