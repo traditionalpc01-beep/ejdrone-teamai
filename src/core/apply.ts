@@ -199,6 +199,8 @@ function applyMergeWrite(
       path,
       resource: keepResource(k.key),
       reason: k.reason === 'foreign-entry' ? 'foreign-file' : 'modified-locally',
+      // 一条路径下可能挂着好几条团队 server，只报文件路径成员不知道该改哪一条。
+      entries: [k.key],
     });
   }
 

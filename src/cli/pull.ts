@@ -157,11 +157,18 @@ async function pullInner(ctx: CliContext, options: PullOptions): Promise<PullOut
   if (snapshot.manifest === null) {
     emit('提示：仓库没有 manifest/roles.yaml，只下发根条目（管理员可用 ejdrone roles add <id> 启用角色）');
   }
-  for (const keep of kept) warn(`  保留 ${keep.path}（${keep.resource}：${keep.reason === 'modified-locally' ? '本地已修改' : '非本工具投递的文件'}）`);
+  for (const keep of kept) {
+    const what = keep.entries && keep.entries.length > 0
+      ? `条目 ${keep.entries.map((e) => `"${e}"`).join('、')}`
+      : keep.resource;
+    warn(`  保留 ${keep.path}（${what}：${keep.reason === 'modified-locally' ? '本地已修改' : '非本工具投递的文件'}）`);
+  }
   for (const path of deleted) emit(`  删除 ${path}`);
 
   finish();
-  const code = kept.length > 0 || delivery.conflicts.length > 0 ? 1 : 0;
+  // haltedKinds 里除了冲突还包含"某类配置文件解析不出来"的停发（如 mcp.yaml）：
+  // 两者都是团队写错了、成员这次少拿一类内容，退出码不能像"一切正常"那样是 0。
+  const code = kept.length > 0 || delivery.haltedKinds.length > 0 ? 1 : 0;
   return { code, fatal: false, kept: kept.length, conflicts: delivery.conflicts.length };
 }
 

@@ -381,7 +381,10 @@ describe('applyPlan: merge delivery (受管条目合并)', () => {
       }),
     );
     expect(run2.result.written).toEqual([]);
-    expect(run2.result.kept).toEqual([{ path, resource: 'mcp:alpha', reason: 'modified-locally' }]);
+    // kept 必须点名到具体条目：一个 .claude.json 里挂着好几条 server，只报文件路径成员不知道该改哪一条
+    expect(run2.result.kept).toEqual([
+      { path, resource: 'mcp:alpha', reason: 'modified-locally', entries: ['alpha'] },
+    ]);
     expect(readFileSync(path, 'utf8')).toBe(memberEdited); // 一个字都不动
     expect(run2.ledger.entries[0]?.managedKeys).toEqual(run1.ledger.entries[0]?.managedKeys);
   });

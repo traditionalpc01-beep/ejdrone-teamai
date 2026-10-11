@@ -172,6 +172,11 @@ export interface KeptFile {
   path: string;
   resource: ResourceKey;
   reason: 'modified-locally' | 'foreign-file';
+  /**
+   * 条目级合并（merge 投递）专用：这个文件里具体是哪几条没被动过。
+   * 共享配置文件一条路径下可能挂着好几条团队 server，只报"这个文件保留了"成员没法知道改哪一条。
+   */
+  entries?: string[];
 }
 
 export interface ApplyResult {

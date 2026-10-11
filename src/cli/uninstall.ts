@@ -2,7 +2,8 @@ import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from
 import { join } from 'node:path';
 
 import { registry } from '../agents/index.js';
-import { hookTarget } from '../agents/paths.js';
+import { hookTarget, mcpTargetPath } from '../agents/paths.js';
+import { mergeEntries } from '../core/merge.js';
 import { hasHook } from '../hooks.js';
 import { hashContent, loadLedger, saveLedger } from '../core/ledger.js';
 import { BLOCK_END, BLOCK_RESOURCE_KEY, BLOCK_START } from '../agents/block.js';
@@ -15,6 +16,24 @@ import { pruneAfterDeletions } from './dirclean.js';
 
 export interface UninstallOptions {
   force?: boolean;
+}
+
+/**
+ * 这条记账是不是"条目级合并"的落点，以及那个落点在哪。
+ * 工具 id 从合成 key `mcp:<tool>-merge` 里取：账本里不重复存 format/pointer，
+ * 那张表只有一个真源（paths.ts），存两份会在改表之后互相打脸。
+ */
+function mergeTargetOf(
+  entry: LedgerEntry,
+  ctx: CliContext,
+): { format: 'json' | 'toml'; pointer: string[] } | null {
+  if (!entry.resource.startsWith('mcp:') || !entry.resource.endsWith('-merge')) return null;
+  const id = entry.resource.slice('mcp:'.length, entry.resource.length - '-merge'.length);
+  try {
+    return mcpTargetPath(id, ctx.home, ctx.env);
+  } catch {
+    return null; // 表里已经没有这个工具了：不动成员的文件
+  }
 }
 
 export async function uninstallCommand(ctx: CliContext, options: UninstallOptions): Promise<number> {
@@ -73,6 +92,48 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
       current = readFileSync(entry.path, 'utf8');
     } catch {
       current = null;
+    }
+
+    const mergeTarget = mergeTargetOf(entry, ctx);
+    if (mergeTarget !== null && entry.managedKeys !== undefined) {
+      // 条目级合并（MCP）：那个配置文件归成员在用，只撤我们自己投递的那几条，绝不删整个文件。
+      // 成员改过的那条留着 —— 并把它继续记在账本里（下面 kept 的条目不进 dropped）。
+      if (current === null) {
+        kept.push({ entry, reason: '读取失败' });
+        continue;
+      }
+      const outcome = mergeEntries({
+        format: mergeTarget.format,
+        pointer: mergeTarget.pointer,
+        current,
+        previous: entry.managedKeys,
+        desired: {},
+      });
+      if (!outcome.ok) {
+        kept.push({ entry, reason: `配置无法解析或形状不认识，没动它：${outcome.error ?? '未知原因'}` });
+        continue;
+      }
+      const edited = (outcome.kept ?? []).filter((k) => k.reason === 'modified-locally').map((k) => k.key);
+      if (outcome.changed && outcome.text !== undefined) {
+        try {
+          writeFileSync(entry.path, outcome.text, 'utf8');
+        } catch (e) {
+          kept.push({ entry, reason: `写入失败：${e instanceof Error ? e.message : String(e)}` });
+          continue;
+        }
+      }
+      if (edited.length > 0) {
+        // 账本收窄到你改过的那几条：我们撤掉的部分已经不在这个文件里了，
+        // 留着旧 keys 会让下次 pull 把它们当成"还在成员机器上"。
+        const narrowed = new Set(edited);
+        const keys: Record<string, string> = {};
+        for (const [key, hash] of Object.entries(entry.managedKeys)) if (narrowed.has(key)) keys[key] = hash;
+        entry.managedKeys = keys;
+        kept.push({ entry, reason: `条目 ${edited.map((k) => `"${k}"`).join('、')} 被你改过，留着没撤` });
+      } else {
+        stripped.push(entry);
+      }
+      continue;
     }
 
     if (entry.resource === BLOCK_RESOURCE_KEY) {

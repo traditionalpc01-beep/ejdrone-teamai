@@ -200,6 +200,38 @@ export function seedTeamRepo(h: Harness): void {
 }
 
 /**
+ * 往标准仓库里追加 MCP server：根一条 stdio（全员）+ be 一条 http（带 ${VAR}，只有 be 角色收到）。
+ * 单独一个函数而不是塞进 seedTeamRepo —— 那会让十几个既有端到端断言因为与它们无关的原因改动。
+ */
+export function seedMcp(h: Harness): void {
+  h.writeSeed(
+    'mcp/mcp.yaml',
+    [
+      'servers:',
+      '  - name: shared-formatter',
+      '    description: 统一格式化',
+      '    transport: stdio',
+      '    command: npx',
+      "    args: ['-y', '@acme/formatter-mcp']",
+      '',
+    ].join('\n'),
+  );
+  h.writeSeed(
+    'mcp/be/mcp.yaml',
+    [
+      'servers:',
+      '  - name: be-metrics',
+      '    transport: http',
+      '    url: https://metrics.example.com/mcp',
+      '    headers:',
+      '      Authorization: Bearer ${BE_METRICS_TOKEN}',
+      '',
+    ].join('\n'),
+  );
+  h.commitSeed('seed mcp servers');
+}
+
+/**
  * 伪造 HOME 下要"探测到"这些工具，就得先有它们的根目录。
  * 根目录名一律取自 paths.ts 的表 —— 硬编码表会在新增工具时静默回落成 `.<id>`，
  * 于是测试"装了"而适配器看的是另一个目录。
