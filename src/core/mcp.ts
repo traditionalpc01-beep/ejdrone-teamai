@@ -28,9 +28,9 @@ const serverEntrySchema = z
     transport: z.enum(['stdio', 'http', 'sse']),
     url: z.string().min(1).optional(),
     headers: z.record(z.string()).optional(),
-    // teamai 源格式写 `timeout`，冻结契约字段是 `timeoutMs`；两种拼法都收，toServerDef 里归一。
+    // 仓库里只认 `timeout` 一种拼法（与 teamai 的 mcp.yaml 同名）。内部字段叫 timeoutMs，
+    // 但两种拼法都收会让"写错的那个也生效"，成员看文档学不到唯一写法。
     timeout: z.number().int().nonnegative().optional(),
-    timeoutMs: z.number().int().nonnegative().optional(),
     command: z.string().min(1).optional(),
     args: z.array(z.string()).optional(),
     env: z.record(z.string()).optional(),
@@ -59,8 +59,7 @@ function toServerDef(e: ServerEntry): McpServerDef {
   if (e.description !== undefined) def.description = e.description;
   if (e.url !== undefined) def.url = e.url;
   if (e.headers !== undefined) def.headers = e.headers;
-  const timeoutMs = e.timeout ?? e.timeoutMs;
-  if (timeoutMs !== undefined) def.timeoutMs = timeoutMs;
+  if (e.timeout !== undefined) def.timeoutMs = e.timeout;
   if (e.command !== undefined) def.command = e.command;
   if (e.args !== undefined) def.args = e.args;
   if (e.env !== undefined) def.env = e.env;

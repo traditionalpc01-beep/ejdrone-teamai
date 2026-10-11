@@ -183,6 +183,30 @@ describe('collectMcp: 文件级失败（整体停发，不能当成空集）', (
 });
 
 describe('collectMcp: 条目级失败（跳过该条并点名）', () => {
+  it('timeout 是唯一拼法：写成 timeoutMs 的条目被点名跳过，不会两种都收', () => {
+    const base = tmp();
+    file(
+      base,
+      'mcp/mcp.yaml',
+      yaml(
+        'servers:',
+        '  - name: good',
+        '    transport: stdio',
+        '    command: npx',
+        '    timeout: 600000',
+        '  - name: typo',
+        '    transport: stdio',
+        '    command: npx',
+        '    timeoutMs: 600000',
+      ),
+    );
+    const res = collectMcp(base, new Set());
+    expect(res.fileError).toBeNull();
+    expect(res.servers.map((s) => s.name)).toEqual(['good']);
+    expect(res.warnings[0]).toContain('timeoutMs');
+    expect(res.servers[0]?.payload?.timeoutMs).toBe(600000);
+  });
+
   it('server 条目里的未知 key 逐个点名文件与 key，其余条目照常', () => {
     const base = tmp();
     file(
