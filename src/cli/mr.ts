@@ -1,4 +1,8 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
 import type { Config } from '../core/types.js';
+import { teamReadme } from './team-readme.js';
 import { commitAll, createBranch, isDirty, listRemoteBranches, prePushScan, push, removePaths, writeFiles } from '../git/repo.js';
 import { makeGitProvider } from '../git/provider.js';
 import { newMrWebUrl, parseRepoRef } from '../git/gitlab.js';
@@ -79,6 +83,11 @@ async function submitMrChangeInner(
   await createBranch(dir, branch, bootstrap ? undefined : existing ?? targetBranch, ctx.env);
 
   const written = Object.entries(change.files);
+  if (bootstrap && !('README.md' in change.files) && !existsSync(join(dir, 'README.md'))) {
+    // 空仓库的第一笔提交顺手把首页说明书放进去：新同事打开仓库就该看得见怎么加入，
+    // 而不是靠有人在群里再贴一遍命令。
+    written.push(['README.md', teamReadme(config.repo, targetBranch)]);
+  }
   if (written.length > 0) {
     writeFiles(dir, Object.fromEntries(written.map(([rel, content]) => [`./${rel}`, content])));
   }

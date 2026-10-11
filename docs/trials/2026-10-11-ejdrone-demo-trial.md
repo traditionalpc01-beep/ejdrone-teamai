@@ -53,7 +53,19 @@
 修法：uninstall 读文件、按 ledger 记录的区块哈希判断是否被本地改过；未改过就撤掉整对标记及其正文（**只撤区块，绝不删这个文件**，因为 `ownsPath` 对 AGENTS.md 本来就是 false），撤完所剩空白即保持空白；被本地改过才保留并点名。区块的标记语义抽成 `src/core/region.ts` 单点实现，apply 与 uninstall 共用，避免两处对"这块是不是我们投的"得出不同结论。
 验证：3 条新用例（撤掉未改动的区块且标记外内容逐字节保留 / 只剩区块时留空文件不删 / 区块被改过时保留并点名）；旧用例原本断言"区块原样留下"，按新语义改写。测试 220 → **223 全绿**。
 
-累计测试数：198 → 220 → **223**（`npx vitest run` 全绿，`tsc --noEmit` 0 错误）。
+### 缺陷 5 · 团队仓库是黑箱（可用性，非代码 bug）
+真机建完 demo 仓库后打开首页，只有 `manifest/`、`skills/`、`rules/` 三个目录：没有一处说明这仓库是干什么的、
+谁负责初始化、成员怎么加入、成员怎么退出。新同事只能靠有人在群里贴命令，体系没法自解释。
+修法：模板化的首页说明书 `src/cli/team-readme.ts`，空仓库的**引导提交自动带上 README.md**；
+已有仓库用新命令 `ejdrone readme` 走 MR 补一份或刷新（内容已是最新时不产出空 MR）。
+内容覆盖：仓库定位、管理员/成员职责表、加入与退出的逐条命令、目录语义与"共享放根、差异放 namespace"这条
+最易踩的规矩、提交新内容的四步流程、各工具落点表、排查入口（doctor/status/list/debug.log）、禁止提交密钥。
+验证：5 条用例（3 条模板内容 + 1 条空仓库引导 + 1 条已有仓库走 MR），测试 223 → **228 全绿**。
+真机补跑：本机重新 init demo 仓库 → `ejdrone readme` → PR #3 合入，main 首页出现 90 行 README，
+含仓库地址、`ejdrone init <本仓库>`、管理员/成员职责表、目录规矩、落点表、`ejdrone doctor` 排查入口与"不要提交密钥"。
+随后 `uninstall --force` 输出 `撤掉 1 处团队区块`（缺陷 4 的新语义在真机生效），三个配置文件与试验前备份逐字节一致。
+
+累计测试数：198 → 220 → 223 → **228**（`npx vitest run` 全绿，`tsc --noEmit` 0 错误）。
 
 ## 4. 已知行为与未修项（不算 bug，但要知道）
 
@@ -102,6 +114,7 @@ rm -rf ~/.ejdrone                      # 清状态目录
 ## 7. 交付物清单
 
 - 代码仓库：`ejdrone-skills`（含本记录）
-- 团队资产仓库 `ejdrone-teamai-demo`：`manifest/roles.yaml`、`skills/shoot/photo-shoot-organizer/SKILL.md`、`rules/shoot/shoot-delivery-convention.md`，PR #1 与 PR #2 均已合入 main
+- 团队资产仓库 `ejdrone-teamai-demo`：`README.md`（PR #3）、`manifest/roles.yaml`、
+  `skills/shoot/photo-shoot-organizer/SKILL.md`、`rules/shoot/shoot-delivery-convention.md`，PR #1/#2/#3 均已合入 main
 - 本轮代码改动：`src/git/repo.ts`、`src/cli/mr.ts`、`src/core/apply.ts`、`src/core/resources.ts` + 6 条新用例，
   已提交 `7a78155` 并推到 ejdrone-skills 的 main

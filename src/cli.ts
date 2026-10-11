@@ -13,6 +13,7 @@ import { initCommand, type InitOptions } from './cli/init.js';
 import { listCommand, type ListOptions } from './cli/list.js';
 import { pullCommand, type PullOptions } from './cli/pull.js';
 import { pushCommand, type PushOptions } from './cli/push.js';
+import { readmeCommand } from './cli/readme.js';
 import { removeCommand } from './cli/remove.js';
 import { rolesAdd, rolesList, rolesRemove, rolesSet, type RolesAddOptions, type RolesSetOptions } from './cli/roles.js';
 import { statusCommand } from './cli/status.js';
@@ -132,6 +133,11 @@ export async function runCli(argv: string[], input: CliContextInput = {}): Promi
     .argument('<kind>', 'skills | rules')
     .argument('<names...>', '资源名，可多个')
     .action(guard(async (kind: string, names: string[]) => removeCommand(ctx, kind, names)));
+
+  program
+    .command('readme')
+    .description('给团队仓库生成/更新首页说明书 README.md（走 MR；空仓库初始化时会自动带）')
+    .action(guard(async () => readmeCommand(ctx)));
 
   program
     .command('doctor')

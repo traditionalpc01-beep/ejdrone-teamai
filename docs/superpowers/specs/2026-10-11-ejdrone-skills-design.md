@@ -219,6 +219,7 @@ GitLab token **不落盘**：只读 `EJDRONE_GITLAB_TOKEN`（或 `GL_TOKEN`）�
 | `ejdrone list [skills\|rules] [--source repo\|local\|all]` | 列出资源及归属 namespace、是否根条目 | 0 |
 | `ejdrone roles list/set/add/remove` | `set <primary> [--add <ids>]` 改本地 config；`add/remove` 走 MR 改团队 manifest（管理员） | 0 |
 | `ejdrone remove <kind> <name...>` | **只从团队仓库删除（走 MR）**，不动本地副本 —— 未合入就删会与团队其他成员不一致。合入后 `pull` 移除各工具副本；你改过的副本保留并点名 | 0 |
+| `ejdrone readme` | 生成/更新团队仓库首页的 `README.md`（走 MR）。空仓库的引导提交会自动带一份，这样新成员打开仓库首页就知道这是什么、怎么加入、怎么退出，不靠群里口头传 | 0；内容已是最新时不产生空 MR |
 | `ejdrone doctor [--json]` | 逐项检查：config 可读、repo 可达、manifest 可解析、每个选定工具的 hook 已装、ledger 与磁盘一致、paths 未核对项（WARN） | 0 全绿；非 0 有失败项 |
 | `ejdrone uninstall [--force]` | 移除所有工具的 hook + 删除 ledger 记账且内容仍匹配的文件；保留 config 与你改过的副本 | 0 |
 

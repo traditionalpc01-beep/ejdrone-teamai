@@ -24,7 +24,7 @@ ejdrone init https://gitlab.example.com/team/ejdrone-teamai.git
 ejdrone doctor          # 逐项体检，全绿才算好
 ```
 
-仓库里的结构就是全部真相：
+仓库里的结构就是全部真相（空仓库的第一笔提交会自带一份 `README.md`，说明这仓库是什么、成员怎么加入怎么退出；内容过期了用 `ejdrone readme` 重新生成）：
 
 ```
 manifest/roles.yaml        # 角色 → namespace 映射
@@ -100,6 +100,7 @@ ejdrone push --skill ~/.claude/skills/team-release --ns devops
 | `roles list\|set <id> [--add ids]` | 本地订阅哪些角色 |
 | `roles add\|remove <id>` | 管理员改团队 manifest（走 MR） |
 | `remove <kind> <name...>` | 从**仓库**删除资源（走 MR）。不动你本地副本 —— 合入后 `pull` 会自动移除 |
+| `readme` | 生成/更新团队仓库首页的 `README.md`（走 MR）。空仓库初始化时会自动带一份，已有仓库补一份用这个 |
 | `doctor [--json]` | 体检：config / 仓库 / manifest / hook / 投递记账 / 落点核对状态 |
 | `uninstall [--force]` | 移除 hook 与投递的文件；撤掉未被你改过的团队区块（AGENTS.md 本体与标记外内容保留）；保留 config 和你改过的副本 |
 
