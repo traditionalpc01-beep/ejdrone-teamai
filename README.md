@@ -1,6 +1,6 @@
 # ejdrone-skills
 
-把团队的 AI skills / rules 放进一个 Git 仓库，按**角色**裁剪后自动投递到每个成员的各种 AI 编程工具原生目录。
+把团队的 AI skills / rules / MCP server 定义放进一个 Git 仓库，按**角色**裁剪后自动投递到每个成员的各种 AI 编程工具原生目录。
 一人调好的经验走 MR 评审合入，其他人下次开会话就自动有了 —— 不用通知、不用手动复制。
 
 15-25 人规模、只有 user scope、不建服务端。设计取舍见 `docs/superpowers/specs/2026-10-11-ejdrone-skills-design.md`。
@@ -8,11 +8,16 @@
 ## 装
 
 ```bash
-npm install -g ejdrone-skills   # 内网 npm 源
+npm install -g ejdrone-skills@2.0.0-preview.0   # 内网 npm 源
 ejdrone --version
 ```
 
-前置：Node.js ≥ 20、git。
+2.0 目前以 **preview** 形态发：六类资源（skills / rules / mcp / agents / docs / learnings）的代码与测试都已就位。
+验证状态分三档，按档取用：skills / rules / MCP 在 macOS 真机上走过投递与卸载还原；
+子 Agent、团队知识、经验沉淀只有夹具级逐字节对拍（没有开真实工具会话确认 `/agents` 与 `recall` 的实际表现）；
+Windows 只到代码层，没做过真机。预发布号不会被裸 `npm install -g ejdrone-skills` 选中，所以装它要显式带版本号。
+
+前置：Node.js ≥ 20、git。Windows 另需 Git for Windows（hook 走它的 bash.exe 绝对路径）。
 
 ## 管理员：建团队仓库
 
@@ -141,19 +146,73 @@ ejdrone push --mcp local-formatter     # 反向采集 → 自动分支 + MR
 - `remove mcp <名字>` 同样只删仓库（走 MR），你本机那份由合入后的下一次 `pull` 撤掉；
   根与 namespace 两处同名时会拒绝并列出两个文件，要你带 `--ns`/`--role` 表态。
 
+## 下发子 Agent
+
+仓库里的 `agents/<名字>.md`（带 frontmatter）会投到各工具自己的 agents 目录，一个 agent 一个文件。
+每个工具吃形态不一样，投递时按落点表转换，只有一处做转换（`src/agents/agentfmt.ts`）：
+
+| 形态 | 哪些工具 | 落点文件 |
+|---|---|---|
+| markdown | Claude / Qoder / Qoder CN / Cursor / CodeBuddy / WorkBuddy / OpenCode | `agents/<名字>.md` |
+| Copilot 形 | GitHub Copilot CLI | `agents/<名字>.agent.md` |
+| TOML | Codex | `agents/<名字>.toml`（写 `name/description/developer_instructions/model`，**故意不写 tools**） |
+| JSON | Kiro | `agents/<名字>.json`（`name/description/prompt/model/tools`） |
+
+- `agents/<ns>/<名字>.md` 只发给激活了 `fe` 这类 namespace 的角色；同名时 namespace 条目整体替换根条目，
+  两个激活角色撞同名则整类停发、已装的不动（与 skills/rules 同一套裁决）。
+- **6 个工具没有用户级 agents 落点**：DeepSeek Harness、Pi、OpenClaw、Trae、Trae CN、Hermes。
+  落点表里没有它们，投递就跳过 —— 不会凭空造一个工具不读的目录。
+- 你自己写好的 agent 可以直接采进仓库：
+
+```bash
+ejdrone list agents                    # 仓库里现有哪几份
+ejdrone push --agent code-reviewer     # 从你在用的工具目录反向采集 → 自动分支 + MR
+ejdrone remove agents code-reviewer    # 只删仓库（走 MR），合入后大家的下一次 pull 自动移除
+```
+
+`push --agent` 在多个工具里撞同名且内容不同时**会拒绝并逐处点名**，要你加 `--tool claude` 说清采哪一份；
+Codex 的 `.toml` 不做反向解析（与 MCP 侧同一个决定），那份想入库就手写 markdown。
+
+## 团队知识与经验沉淀
+
+`docs/` 与 `learnings/` 不进任何工具目录，而是镜像到 `~/.ejdrone/knowledge/`，用一条命令检索：
+
+```bash
+ejdrone recall "kafka 消费积压"        # 前 5 条：路径 + 命中片段，按标题×3 / tags×2 / 正文×1 排序
+ejdrone recall --check "灰度发布"      # 只判相关性：RELEVANT / NOT_RELEVANT，退出码 0 / 1，不打印正文
+ejdrone recall "mysql 加索引" --json   # 给脚本用
+```
+
+镜像内容 = 你订阅的角色该拿到的那部分，非激活 namespace 的文档既不在镜像里、也就检索不到。
+成员改过镜像里的那一份，`pull` 会保留你的版本并点名，不覆盖。
+
+踩过的坑往回流：
+
+```bash
+ejdrone contribute --file ./notes.md            # 补全 frontmatter → 命名 learnings/<日期>-<标题>.md → 分支 + MR
+ejdrone contribute --file ./notes.md --dry-run  # 只看会写成什么样，一个 git 副作用都不发生
+```
+
+合入后大家 `pull` 到镜像，`recall` 就检索得到。两条内置技能（`ejdrone-recall`、`ejdrone-share`）随
+`ejdrone readme` 一起提交进团队仓库，之后作为普通 skill 下发 —— 教 AI 在动手前先做一次检索、
+在被反复纠正时提议沉淀。这两个名字在 `push` 侧是保留名，不能用你本地那份覆盖团队仓库里的版本；
+要改就在仓库里改并走 MR。
+
 ## 命令
 
 | 命令 | 作用 |
 |---|---|
 | `init <repo>` | 选定工具与角色、装 hook、首次 pull |
 | `pull [--force] [--silent]` | 同步团队仓库并投递。`--force` 覆盖本地改过的整文件投递（团队区块只动区块） |
-| `push [--skill p] [--rule p] [--mcp name] [--agent id] [--all] [--role id] [--ns ns]` | 推资源，自动分支 + MR。`--mcp` 从本机 MCP 配置反向采集；`--all` 只含 skills/rules |
+| `push [--skill p] [--rule p] [--mcp name] [--agent path] [--tool id] [--all] [--role id] [--ns ns]` | 推资源，自动分支 + MR。`--mcp` 从本机 MCP 配置反向采集；`--agent` 从工具 agents 落点反向采集（要单独跑，各自一个 MR）；`--tool` 把这两种采集缩到一个工具 id；`--all` 只含 skills/rules |
 | `status` | 待推送 / 落后 / 本地改动（含 MCP） |
-| `list [skills\|rules\|mcp] [--source repo\|local\|all]` | 列资源及其 namespace 与根条目归属；`list mcp --source local` 只列 server 名与文件路径，不回显值 |
+| `list [skills\|rules\|mcp\|agents\|docs\|learnings] [--source repo\|local\|all]` | 列资源及其 namespace 与根条目归属；`list mcp --source local` 只列 server 名与文件路径，不回显值 |
+| `recall "<关键词>" [--check] [--json]` | 检索团队知识镜像（`docs` + `learnings`）。`--check` 只判相关性、不打印正文，命中返回 0、未命中返回 1 |
+| `contribute --file <path> [--title t] [--ns ns] [--dry-run]` | 把一份踩坑记录沉淀成 learning 并走 MR 入库；`--dry-run` 不发生任何 git 副作用 |
 | `roles list\|set <id> [--add ids]` | 本地订阅哪些角色 |
 | `roles add\|remove <id>` | 管理员改团队 manifest（走 MR） |
 | `remove <kind> <name...> [--role id] [--ns ns]` | 从**仓库**删除资源（走 MR）。不动你本地副本 —— 合入后 `pull` 会自动移除 |
-| `readme` | 生成/更新团队仓库首页的 `README.md`（走 MR）。空仓库初始化时会自动带一份，已有仓库补一份用这个 |
+| `readme` | 生成/更新团队仓库首页的 `README.md`，并把仓库里还没有的两份内置技能（`skills/ejdrone-recall`、`skills/ejdrone-share`）一起提交（走 MR；团队已改过的那份绝不覆盖）。空仓库初始化时会自动带一份，已有仓库补一份用这个 |
 | `doctor [--json]` | 体检：config / 仓库 / manifest / hook / 投递记账 / 落点核对，外加 MCP 四项（文件可解析、缺哪个变量、受管条目是否被你改过、哪些工具没有 MCP 落点） |
 | `uninstall [--force]` | 移除 hook 与投递的文件；撤掉未被你改过的团队区块（AGENTS.md 本体与标记外内容保留）；保留 config 和你改过的副本 |
 
@@ -163,24 +222,24 @@ ejdrone push --mcp local-formatter     # 反向采集 → 自动分支 + MR
 
 16 个工具，全部只有 user scope。「真机核实」列是本机（macOS）逐项盘出来的，没核到的格子一律标出来，不猜。
 
-| 工具 | skills | rules | MCP 落点 | 真机核实 |
-|---|---|---|---|---|
-| Claude Code | `~/.claude/skills/` | `~/.claude/rules/*.md`（官方用户级载体，支持 `paths:` 按需加载） | `~/.claude.json` | 已核 |
-| Qoder CN | `~/.qoder-cn/skills/` | `~/.qoder-cn/rules/*.md` | `~/.qoder-cn/settings.json` | 部分（rules 是否被读取未证） |
-| Qoder | `~/.qoder/skills/` | `~/.qoder/rules/*.md` | `~/.qoder/mcp.json` | 部分（rules 与 hook 未证） |
-| Cursor | `~/.cursor/skills/` | `~/.cursor/rules/*.mdc` | `~/.cursor/mcp.json` | 未核（本机未装） |
-| Codex | `~/.codex/skills/` | `~/.codex/AGENTS.md` 团队区块（其原生 `rules/` 是命令策略目录，非 markdown） | `~/.codex/config.toml` | 部分（hook 未核） |
-| GitHub Copilot CLI | `~/.copilot/skills/`（或 `$COPILOT_HOME`） | `~/.copilot/AGENTS.md` 团队区块 | `~/.copilot/mcp-config.json` | 未核（本机未装） |
-| CodeBuddy | `~/.codebuddy/skills/` | — | `~/.codebuddy/.mcp.json` | 部分（hook 未证） |
-| WorkBuddy | `~/.workbuddy/skills/` | — | `~/.workbuddy/mcp.json` | 部分（hook 未证） |
-| OpenCode | `~/.config/opencode/skills/` | `~/.config/opencode/AGENTS.md` 团队区块 | `~/.config/opencode/opencode.json` | 未核（本机未装） |
-| Pi Coding Agent | `~/.pi/agent/skills/` | — | `~/.pi/agent/mcp.json` | skills 已核 |
-| OpenClaw | `~/.openclaw/skills/` | — | — | skills 已核（hook 是 workspace 级，user scope 不做） |
-| Hermes | `~/.hermes/skills/` | — | — | skills 已核（`~/.hermes/hooks` 是目录，非 JSON 载体） |
-| Kiro | `~/.kiro/skills/` | — | `~/.kiro/settings/mcp.json` | skills 已核（SessionStart 由 agent 同步内嵌，无用户级落点） |
-| Trae | `~/.trae/skills/` | `~/.trae/rules/*.md`（原生目录） | — | 已核（无 hook 落点） |
-| Trae CN | `~/.trae-cn/skills/` | `~/.trae-cn/user_rules/*.md` | — | 部分（该目录存在但为空） |
-| DeepSeek Harness | `~/.dsh/skills/`（或 `$DSH_HOME`） | `~/.dsh/AGENTS.md` 团队区块 | — | 未核（本机未装） |
+| 工具 | skills | rules | MCP 落点 | agents 落点 | 真机核实 |
+|---|---|---|---|---|---|
+| Claude Code | `~/.claude/skills/` | `~/.claude/rules/*.md`（官方用户级载体，支持 `paths:` 按需加载） | `~/.claude.json` | `~/.claude/agents/*.md` | 已核 |
+| Qoder CN | `~/.qoder-cn/skills/` | `~/.qoder-cn/rules/*.md` | `~/.qoder-cn/settings.json` | `~/.qoder-cn/agents/*.md` | 部分（rules 是否被读取未证） |
+| Qoder | `~/.qoder/skills/` | `~/.qoder/rules/*.md` | `~/.qoder/mcp.json` | `~/.qoder/agents/*.md` | 部分（rules 与 hook 未证） |
+| Cursor | `~/.cursor/skills/` | `~/.cursor/rules/*.mdc` | `~/.cursor/mcp.json` | `~/.cursor/agents/*.md` | 未核（本机未装） |
+| Codex | `~/.codex/skills/` | `~/.codex/AGENTS.md` 团队区块（其原生 `rules/` 是命令策略目录，非 markdown） | `~/.codex/config.toml` | `~/.codex/agents/*.toml` | 部分（hook 未核） |
+| GitHub Copilot CLI | `~/.copilot/skills/`（或 `$COPILOT_HOME`） | `~/.copilot/AGENTS.md` 团队区块 | `~/.copilot/mcp-config.json` | `~/.copilot/agents/*.agent.md` | 未核（本机未装） |
+| CodeBuddy | `~/.codebuddy/skills/` | — | `~/.codebuddy/.mcp.json` | `~/.codebuddy/agents/*.md` | 部分（hook 未证） |
+| WorkBuddy | `~/.workbuddy/skills/` | — | `~/.workbuddy/mcp.json` | `~/.workbuddy/agents/*.md` | 部分（hook 未证） |
+| OpenCode | `~/.config/opencode/skills/` | `~/.config/opencode/AGENTS.md` 团队区块 | `~/.config/opencode/opencode.json` | `~/.config/opencode/agents/*.md` | 未核（本机未装） |
+| Pi Coding Agent | `~/.pi/agent/skills/` | — | `~/.pi/agent/mcp.json` | — | skills 已核 |
+| OpenClaw | `~/.openclaw/skills/` | — | — | — | skills 已核（hook 是 workspace 级，user scope 不做） |
+| Hermes | `~/.hermes/skills/` | — | — | — | skills 已核（`~/.hermes/hooks` 是目录，非 JSON 载体） |
+| Kiro | `~/.kiro/skills/` | — | `~/.kiro/settings/mcp.json` | `~/.kiro/agents/*.json` | skills 已核（SessionStart 由 agent 同步内嵌，无用户级落点） |
+| Trae | `~/.trae/skills/` | `~/.trae/rules/*.md`（原生目录） | — | — | 已核（无 hook 落点） |
+| Trae CN | `~/.trae-cn/skills/` | `~/.trae-cn/user_rules/*.md` | — | — | 部分（该目录存在但为空） |
+| DeepSeek Harness | `~/.dsh/skills/`（或 `$DSH_HOME`） | `~/.dsh/AGENTS.md` 团队区块 | — | — | 未核（本机未装） |
 
 `—` = 该工具没有可写的 markdown rules 载体，团队规范不下发给它（宁可少投递，也不往它不读的位置硬写）。
 
@@ -189,7 +248,20 @@ ejdrone push --mcp local-formatter     # 反向采集 → 自动分支 + MR
 **未核对的落点**由 `ejdrone doctor` 点名 —— 只报你在 `init` 里勾选的工具，没勾的折成一行提示，不刷屏。
 所有路径与核实状态集中在 `src/agents/paths.ts` 一张表里，某工具升级改了目录只改那一行。
 
-Windows 未支持（v1 仅 macOS / Linux；2.0 的 M10 处理）。
+## Windows
+
+**代码层已就绪，真机未验证** —— 2.0-preview 的这一档就是留给 Windows 机器补的：所有 Windows 分支都过不了
+「用 POSIX 测试冒充验证」这条线，所以下面写的是实现方式，不是已验证结论。逐项待验清单见
+`docs/trials/2026-10-11-m10-trial.md` §4。前置是 **Git for Windows**（https://git-scm.com/download/win）：
+Node ≥ 20 与 Git for Windows 装上即可，其余与 macOS/Linux 相同。
+
+- 会话自动 pull 的 hook 命令走 Git Bash 的 `bash.exe` **绝对路径**，五路查找：`%ProgramFiles%\Git`、
+  `%ProgramFiles(x86)%\Git`、`%LOCALAPPDATA%\Programs\Git`（非管理员装 Git for Windows 的默认位置，
+  企业电脑极常见），再加注册表 `HKLM` 与 `HKCU` 的 `SOFTWARE\GitForWindows`。刻意不用 PATH 上的裸 `bash`——它会解析到
+  WSL 启动器，跑起来的不是 MSYS2 环境，hook 会静默失效。
+- 没装 Git for Windows 时 hook 不安装，`init` 会点名提示；这不影响手动 `ejdrone pull`，
+  `doctor` 的 `win:gitbash` / `win:git` / `win:hookbash` 三项会逐条告诉你缺什么。
+- MCP 条目里的 `requires:` 在 Windows 上按 `PATHEXT` 探测（`npx` 命中 `npx.cmd` 也算数）。
 
 ## 为什么 rules 有四种投递方式
 

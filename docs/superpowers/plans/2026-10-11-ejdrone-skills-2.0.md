@@ -38,16 +38,16 @@
 `src/` 42 文件 / 约 5500 行；5 个工具适配器；`ResourceKind = 'skills' | 'rules'`；user scope；macOS/Linux；
 验收 `tsc --noEmit` 0 错误 + vitest 214/214 绿。设计文档：`docs/superpowers/specs/2026-10-11-ejdrone-skills-design.md`。
 
-### 对标物核对结果（Tencent/teamai-cli，2026-10-11 核对，commit `2cbf556`）
+### 对标物核对结果（Tencent/teamai-cli，首轮 2026-10-11 核对 commit `2cbf556`；M7/M8/M9 相关三行于 2026-10-12 二次复核，落到源码级证据）
 
 | 维度 | teamai-cli 实际做法 | 出处 |
 |---|---|---|
 | 支持工具 | 19 个 id + 变体：claude(tclaude/claude-internal)、codex(tcodex/codex-internal)、cursor、copilot、codebuddy、workbuddy、opencode、pi、openclaw、hermes、dsh、qoder、qoder-cn、kiro、trae、trae-cn、zcode、omp、joycode | `README.zh-CN.md` |
 | 资产类型 | skills、rules、docs、env、hooks、mcp、models、agents、learnings、codebase、teamwiki | `README.zh-CN.md`、`docs/guide/zh-CN/sharing.md` |
 | MCP | `mcp/mcp.yaml` + `mcp/<ns>/mcp.yaml`；server 字段 `name/description/transport(stdio\|http\|sse)/url/headers/timeout/command/args/env/requires/tools`；按工具原生格式写入（Claude 系 `mcpServers` JSON、Codex `config.toml`、Copilot `type: local/remote`、OpenCode `mcp` 键）；`${VAR}` 解析成明文落盘、文件收紧 0600、含 token 的项目级文件自动进 `.git/info/exclude` | `sharing.md` §MCP Server |
-| 子 Agent | `agents/` 目录，每 agent 一个 `*.yaml` 或旧格式 `*.md`；投递时按文件名拍平到各工具 `agents/` 目录；Codex 写 `<name>.toml`、Kiro 写 `<name>.json`、Copilot 写 `<name>.agent.md`、其余写 `<name>.md`；namespace 语义与 rules 相同 | `docs/guide/zh-CN/advanced.md` §Agents 资源类型 |
-| 团队知识 | `docs/` 目录整体镜像分发；recall 建索引检索 learnings + docs + rules + skills | `sharing.md` §Docs、`knowledge.md` |
-| 经验沉淀 | Stop hook 按摩擦信号（打断/纠正 AI、拒绝工具、反复重试）评分，达标提示 `/teamai share`；learnings 存团队仓库；`teamai recall "query"` 检索；24h 内打开命中文档算采纳并 upvote | `docs/guide/zh-CN/knowledge.md` |
+| 子 Agent | **新格式是 `agents/<name>.yaml`**（字段 `name`/`description`/`instructions`/`model`/`tools[]`/`targets[]`/`tool_extras.<tool>`，任一必填缺失该文件解析失败但不中断本次 pull）；旧格式 `agents/<name>.md` **逐字节复制**且只有白名单工具收（claude 系、codebuddy、joycode、omp）。投递按文件名拍平：Claude 系 `<name>.md`（frontmatter name/description/model/tools + extras）、Codex 系 `<name>.toml`（键 `name/description/developer_instructions/model`，**故意不写 tools**）、Kiro `<name>.json`（`name/description/prompt/model/tools` + 注入 `hooks.agentSpawn`）、Copilot `<name>.agent.md`（tools 过别名表）、Cursor `.md` 但 frontmatter 键叫 **`agent_id` 不是 `name`**、OpenCode `.md` 不写 `name` 且强制 **`mode: subagent`**；Qoder/Qoder CN/CodeBuddy/WorkBuddy 用 md；**Trae、Trae CN、Pi、OpenClaw、Hermes、dsh 无 agents 落点 → 整体跳过**。namespace 语义同 rules（同名整体替换）；两个活跃 ns 同名 → agents 停发、已装不动。`remove agents <name>` 写 tombstone `agents/.removed`，下次 pull **即使仓库无变化**也把 `<name>.{md,agent.md,toml,json}` 从每个工具目录删掉 | `docs/guide/zh-CN/advanced.md` §Agents + 源码 `resources/agent-format.ts`、`resources/agents.ts`、`types.ts` 落点表 |
+| 团队知识 | `docs/` 作为**一个 bundle 镜像到单一目录**（`sharing.docs.localDir`，默认 `~/.teamai/docs`），**不按工具分发、只被 recall 索引**；`docs/` 不回推（`scanLocalForPush` 返回空）、`remove docs` 明确不支持（要求直接在仓库删）。`docs/<dir>/` 被任一 role 列出即成为 ns，只发给激活者，**无覆盖规则**（每个 ns 独立子树）；ns 失效后只删「与团队当前或历史版本逐字节一致」的副本，成员改过的保留点名。保留名 `RESERVED_DOCS_DIR = 'team-codebase'`（声明它的 manifest 加载失败） | `sharing.md` §Docs + 源码 `resources/docs.ts`、`manifest-schema.ts` |
+| 经验沉淀 | recall 用**持久索引**（`SEARCH_INDEX_VERSION = 7`，`~/.teamai/search-index.json`）：四路采集 learnings/docs/rules/skills + codebase 图，打分 title 3 / tag 2 / body 1 × 域内 IDF ÷ √query 长度，vote +0.5/票（上限 5），域乘子 technical 1.0…support 0.3，**必须命中 title 或 tag**（docs 例外）。`recall [query…] --depth|--check|--caller`，`--check` 输出 `RELEVANT|NOT_RELEVANT score=… threshold=…`，阈值 `max(idfBaseline×1.35, 4.0)`，不读正文、不投票；配置存在但读不了 → 打印 `Nothing was searched: …` 并 **exit 1**。learnings 必填 frontmatter `title/author/date/tags`（2–5 个），正文 Context/Solution/Lessons/Related Skills，文件名 `<slug>-<YYYY-MM-DD>-<rand6>.md`；`contribute --file --title --namespace [--dry-run]` 先写持久队列 `pending-learnings/` 再 publish 到**孤儿分支 `teamai-learnings` 的 worktree**——**不走 MR、不碰默认分支**；`--namespace` 只接受活跃 learnings ns 否则 exit 1。置信度 = `min(1, recalled×0.1+upvoted×0.3)×0.4 + recency×0.3 + upvote/recall×0.3`；晋升判据 confidence ≥0.90、upvoted ≥5、贡献者 ≥2、年龄 ≥14 天 | `docs/guide/zh-CN/knowledge.md` + 源码 `recall.ts`、`utils/search-index.ts`、`contribute.ts`、`utils/learnings-publish.ts`、`contribute-check.ts` |
 | Windows | hook 命令用 Git Bash 绝对路径（标准安装位置 → 注册表 `HKLM\SOFTWARE\GitForWindows`），裸 `bash` 会解析到 WSL 启动器（自带 Node 18）导致 hook 静默崩溃；每个 GUI 工具解析自己的 hook shell；`requires` 匹配走 `PATHEXT`；shell profile 注入要沿 `source` 链找目标文件 | `docs/guide/zh-CN/windows.md`、`advanced.md` §Hooks |
 | 环境变量/密钥 | `env/env.yaml` + `env/secrets.yaml`（只声明 key 不写值），成员 `teamai env set` 本地存值（0600），`env exec` 叠加运行 | `sharing.md` §Env |
 
@@ -281,26 +281,42 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 
 **目标**：`agents/` 目录资源 → 各工具 agents 目录，逐工具格式转换。
 
-**契约前置**：§3.1（agents 为目录型资源）、§3.4 `agentsSubdir`/`agentsFormat`（随 M5 落点矩阵已就位）。
+**契约前置**：§3.1（agents 为目录型资源）、§3.4 `agentsSubdir`/`agentsFormat`（由协调者随 M7 前置任务落 `paths.ts`）。
+
+**2026-10-12 二次复核后固定的三张表**（子代理照此实现，不要再回去猜）：
+
+1. **有 agents 落点的工具 = 10 个**：`claude`、`qoder`、`qoder-cn`、`cursor`、`codex`、`copilot`、`codebuddy`、
+   `workbuddy`、`opencode`、`kiro`。**`dsh`、`pi`、`openclaw`、`hermes`、`trae`、`trae-cn` 无 agents 落点**
+   （teamai 源码 `types.ts` 落点表里这些 id 根本没有 agents 键；openclaw 真机 `~/.openclaw/agents` 存在但那是
+   工具自家目录、非团队 agent 载体）→ `agentsSubdir` 缺席 → 适配器不实现 `planAgents`，**照 mcp 的先例：能力有无只由表决定**。
+2. **四种目标形态**：`md`（Claude 系 / Qoder 系 / CodeBuddy / WorkBuddy，frontmatter `name/description/tools/model`）·
+   `agent-md`（Copilot，文件名 `<name>.agent.md`）· `toml`（Codex，键 `name/description/developer_instructions/model`，
+   **故意不写 tools**）· `json`（Kiro，键 `name/description/prompt/model/tools`）。
+3. **两处工具怪癖登记为 PROBE，不在本轮实现**：Cursor 的 frontmatter 键叫 `agent_id` 而非 `name`、
+   OpenCode 不写 `name` 且强制 `mode: subagent`。两者本机均未安装、无法真机核实，先按 `md` 投，
+   落点表 `probe` 文案点名「teamai 对该工具改写 frontmatter 键，未核」；真机核实后再补形态（§7 已登记）。
+   Kiro 的 `hooks.agentSpawn` 注入不做——那是 teamai 把 hook 藏在 agent 文件里的做法，我们 agents 与 hooks 分属两条链路。
 
 **任务**：
 
-- [ ] **T7.1 解析器**：`core/resources.ts` 扩展 agents：仓库 `agents/<name>.md`、`agents/<ns>/<name>.md`；
+- [x] **T7.1 解析器**：`core/resources.ts` 扩展 agents：仓库 `agents/<name>.md`、`agents/<ns>/<name>.md`；
   只收 md（teamai 的新格式 yaml 不收——多一种源格式就多一条转换链，md frontmatter 已够用，登记 §7）；
-  frontmatter 缺 `name`/`description` 时自动补全（沿用 1.0 补全逻辑与「坏 YAML 保留原文 + 告警」）。
+  frontmatter 缺 `name`/`description` 时自动补全（沿用 1.0 `completeFrontmatter` 与「坏 YAML 保留原文 + 告警」）。
   Test 覆盖：根/ns/缺 frontmatter/坏 YAML/同名冲突。
-- [ ] **T7.2 裁决接入**：同 T6.3，按 §3.2。
-- [ ] **T7.3 格式转换器**：Create `src/agents/agentfmt.ts` — 输入统一 frontmatter+正文，输出四种
-  （`md` 原样 / `agent-md` Copilot 形态 / `toml` Codex 形态 / `json` Kiro 形态）。
-  转换字段表照 teamai `advanced.md` §Agents 矩阵抄并标 PROBE。Test：四种格式各一例 + 往返不丢字段。
-- [ ] **T7.4 适配器 `planAgents`**：`AgentAdapter` 新增；`agentsSubdir` 缺席返回空。
+- [x] **T7.2 裁决接入**：agents 走 §3.2 完整规则（覆盖 + 冲突停发），同 skills/rules。
+- [x] **T7.3 格式转换器**：Create `src/agents/agentfmt.ts` — 输入统一 frontmatter+正文，输出上述四种。
+  公共入口 `renderAgent(spec, format)`；适配器只查 `agentsFormat` 调它，**不许按工具 id 写 if**。
+  Test：四种格式各一例 + 往返不丢字段 + 「正文字节不变」断言（转换只动 frontmatter/封装）。
+- [x] **T7.4 适配器 `planAgents`**：`AgentAdapter` 新增可选方法；`agentsSubdir` 缺席返回空。
   拍平投递（ns 目录拍平成 `<name>.<ext>`），同名冲突由裁决层已拦。
-- [ ] **T7.5 命令**：`push --agent <path>`、`remove agents <name...>`（带 ns 写 `<ns>/<name>`，多位置同名拒绝并列出，
+- [x] **T7.5 命令**：`push --agent <path>`、`remove agents <name...>`（带 ns 写 `<ns>/<name>`，多位置同名拒绝并列出，
   照 teamai 语义）、`list agents`。`remove` 走 MR 删仓库文件即可——1.0 的「合入后 pull 移除」语义不变，
   不需要 teamai 的 tombstone（我们没有「仓库没变也要清理」的场景，登记 §7）。
-- [ ] **T7.6 门槛**：typecheck + 全量测试绿；端到端：根 agent + ns agent → 成员 pull → claude（md）与 codex（toml）
-  落点内容正确 → 切角色后 ns agent 移除、根 agent 保留。
-- [ ] **T7.7 真机**：claude 真机投递一个 agent，开 `/agents` 确认可见可用。试验记录 + 逐字节还原。
+- [x] **T7.6 doctor**：agents 落点逐项可查（有落点但目录不存在 = WARN；停发 = FAIL 点名）。
+- [ ] **T7.7 门槛**：typecheck + 全量测试绿；端到端：根 agent + ns agent → 成员 pull → claude（md）与 codex（toml）
+  落点内容正确 → 切角色后 ns agent 移除、根 agent 保留 → 二次 pull 幂等。
+- [ ] **T7.8 真机**：claude 真机投递一个 agent，开 `/agents` 确认可见可用；codex 侧看 `<name>.toml` 是否被列出。
+  试验记录 + 逐字节还原。
 
 **回滚**：删 `agents/` 目录（MR），pull 后移除。
 
@@ -308,25 +324,35 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 
 **目标**：`docs/` 按角色裁剪镜像到本地；`ejdrone recall` 一条命令检索知识。
 
+**二次复核确认的对标事实**：teamai 的 docs 也是**镜像到单一本地目录**（默认 `~/.teamai/docs`）且**只被 recall 索引、
+不按工具分发**，与我们的 `~/.ejdrone/knowledge/docs/` 同形——这条不是我们的发明。另外 teamai 的 docs
+**不支持从本地回推**（`scanLocalForPush` 返回空）、`remove docs` 明确不支持。这两条我们照抄：知识入库只有 `push --doc`
+之外的路（直接在仓库 `docs/` 提交走 MR），避免「成员本地目录里的文件算不算团队资产」这条含糊账。
+
 **任务**：
 
-- [ ] **T8.1 docs 资源**：docs 为单文件 md 资源（`docs/**.md`，`docs/<ns>/` 为 namespace 子树）。
+- [x] **T8.1 docs 资源**：docs 为单文件 md 资源（`docs/**.md`，`docs/<ns>/` 为 namespace 子树）。
   与 rules 的差异：**无覆盖语义**——ns 子树是独立集合，不替换根文件（teamai 同，避免「同名文档互相盖」）。
-  `resolve()` 对 docs 跳过覆盖/冲突两条规则，只做并集。`team-codebase` 保留名禁用（teamai 教训）。
-- [ ] **T8.2 镜像投递**：投递到 `~/.ejdrone/knowledge/docs/`（不进各工具目录——16 个工具没有统一的知识落点，
-  镜像 + recall 是唯一不依赖工具私语的形态，登记 §7）。ledger 照常记账，删除/keep 语义同 1.0。
-- [ ] **T8.3 recall 命令**：Create `src/cli/recall.ts` — `ejdrone recall "<query>" [--check] [--json]`。
-  无索引全文扫描（15-25 人团队的 docs+learnings 量级在数百文件内，ripgrep 式扫描 <100ms，不建索引——
-  teamai 的索引/格式版本/缩减保护那一整套都是为这个量级以上准备的，登记 §7）。
+  `resolve()` 对 docs 跳过覆盖/冲突两条规则，只做并集。`team-codebase` 保留名禁用（teamai 教训；2.1 若加 codebase 就不撞车）。
+- [x] **T8.2 镜像投递**：投递到 `~/.ejdrone/knowledge/docs/<ns>/<name>.md`（根条目不带 ns 段），
+  **不进各工具目录**——16 个工具没有统一的知识落点，镜像 + recall 是唯一不依赖工具私语的形态，登记 §7。
+  ledger 照常记账，删除/keep 语义同 1.0：成员改过的镜像副本不覆盖、只点名；ns 失效才删。
+- [x] **T8.3 recall 命令**：Create `src/cli/recall.ts` — `ejdrone recall "<query>" [--check] [--json]`。
+  无索引全文扫描（15-25 人团队的 docs+learnings 量级在数百文件内，扫描 <100ms，不建索引——
+  teamai 的 index v7 / 域乘子 / hotness / vote / 去重键那一整套都是为这个量级以上准备的，登记 §7）。
   打分：标题命中 ×3、frontmatter tags ×2、正文 ×1；输出前 5 条（路径 + 命中片段 ±2 行）。
-  `--check` 输出 `RELEVANT score=<n> threshold=<n>` 或 `NOT_RELEVANT ...`，退出码 0/1，不读文件正文。
+  `--check` 输出 `RELEVANT score=<n> threshold=<n>` 或 `NOT_RELEVANT ...`，退出码 0/1，不读文件正文之外的事
+  （teamai 的 `--check` 同样「不投票、不写日志」，这条语义是 hook/skill 预检用的，必须一致）。
   Test `test/cli/recall.test.ts`（临时 HOME 夹具）。
-- [ ] **T8.4 内置 skill**：仓库引导提交与 `ejdrone readme` 生成的内容里加一条内置 skill `ejdrone-recall`
+- [x] **T8.4 内置 skill**：仓库引导提交与 `ejdrone readme` 生成的内容里加一条内置 skill `ejdrone-recall`
   （教 agent：动手前先 `ejdrone recall --check "<任务关键词>"`，RELEVANT 才读文件）。
-  它作为普通根 skill 下发，成员可删可改（MR 评审兜底）。
-- [ ] **T8.5 门槛**：typecheck + 全量测试绿；端到端：seed docs 根 + ns → 成员 pull → 镜像存在且 ns 过滤正确 →
-  recall 命中根文档、不命中未激活 ns 文档 → `--check` 两种退出码正确。
-- [ ] **T8.6 真机**：本机跑三次真实 recall（中英文混合 query），人工判读前 5 条可用。试验记录 + 还原。
+  它作为普通根 skill 下发，成员可删可改（MR 评审兜底）。teamai 把 `teamai-recall` 设为保留名、永不 push，
+  我们沿用：`ejdrone-recall` 与 `ejdrone-share` 两个名字在 push 侧拒绝（防成员把内置 skill 改名推回覆盖团队版）。
+- [x] **T8.5 doctor/status**：knowledge 镜像目录存在性、docs 停发点名、镜像与账本一致性（照 mcp 那四项的形）。
+- [x] **T8.6 门槛**：typecheck + 全量测试绿；端到端：seed docs 根 + ns → 成员 pull → 镜像存在且 ns 过滤正确 →
+  recall 命中根文档、不命中未激活 ns 文档 → `--check` 两种退出码正确 → 成员改过镜像副本后 pull 只点名不覆盖 →
+  ns 失效后镜像副本删除。
+- [ ] **T8.7 真机**：本机跑三次真实 recall（中英文混合 query），人工判读前 5 条可用。试验记录 + 还原。
 
 **回滚**：删 `docs/`（MR）+ 移除镜像目录记账。
 
@@ -334,24 +360,45 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 
 **目标**：成员把踩坑经验沉淀进团队仓库并全员可检索。主线不依赖任何新 hook。
 
+**二次复核确认的对标事实**：teamai 的 `contribute` **不走 MR**——先写持久队列 `pending-learnings/`，
+再 publish 到孤儿分支 `teamai-learnings` 的 worktree，靠「不碰默认分支」换来免评审。它必填 frontmatter
+`title/author/date/tags`（tags 2–5），文件名 `<slug>-<YYYY-MM-DD>-<rand6>.md`（rand6 防同人同日撞名），
+摩擦分是 interrupt/toolReject/correction 各 ×20 + toolError 梯度、阈值 20 且 toolCount ≥ 15，每会话最多提示一次。
+这些我们**有意不照抄**，理由逐条登记 §7：我们的仓库是团队 GitLab、经验入库要走评审（这是本项目存在的理由）。
+
 **任务**：
 
-- [ ] **T9.1 learnings 资源**：`learnings/<id>.md`、`learnings/<ns>/<id>.md`，单文件 md + frontmatter
-  （`title`、`tags[]`、`created`；缺则补全）。语义同 docs（并集，无覆盖）。镜像到 `~/.ejdrone/knowledge/learnings/`。
+- [x] **T9.1 learnings 资源**：`learnings/<id>.md`、`learnings/<ns>/<id>.md`，单文件 md + frontmatter
+  （`title`、`tags[]`、`date`；缺则由文件名/正文/当天补全，**不因为缺 tags 拒绝入库**）。语义同 docs（并集，无覆盖）。
+  镜像到 `~/.ejdrone/knowledge/learnings/`。
   recall 扫描范围 = docs + learnings 镜像 + 当前激活 namespace 的 skills/rules 正文——后者**复用 `core` 的
   `resolve()` 对 checkout 只读跑一遍**取候选集，不在 recall 里重新实现 namespace 过滤。
-- [ ] **T9.2 contribute 命令**：Create `src/cli/contribute.ts` — `ejdrone contribute --file <session.md> [--ns <ns>]`。
-  校验/补全 frontmatter → 复用 push 管线（分支 + MR）到 `learnings/`。`--ns` 多 namespace 角色必给（与 push 同规则）。
+- [x] **T9.2 contribute 命令**：Create `src/cli/contribute.ts` — `ejdrone contribute --file <path> [--title <t>] [--ns <ns>] [--dry-run]`。
+  校验/补全 frontmatter → 生成 `learnings/<YYYY-MM-DD>-<slug>.md`（slug 允许中文，取不到就退回文件名；
+  **目标路径已存在就拒绝并提示改名**，不做 rand6）→ 复用 push 管线（分支 + MR）到 `learnings/`。
+  `--ns` 多 namespace 角色必给（与 push 同规则）。`--dry-run` 只打印落库后的文件内容与目标路径，不建分支、不开 MR。
   配套内置 skill `ejdrone-share`（教 agent：被反复纠正/工具连续失败时，主动总结成 learning 文件并提示用户跑 contribute；
-  是否提示由用户决定，skill 里写明「只在用户说『分享给团队』时才真的 contribute」）。
-- [ ] **T9.3 门槛**：typecheck + 全量测试绿；端到端：contribute → MR → 合入 → 另一成员 pull → recall 命中该 learning。
-- [ ] **T9.4（stretch，可砍）Stop hook 摩擦提示**：先探针——查 claude/codex/qoder-cn 的 Stop 事件与 transcript 可读性
-  （`hookEvents` 表已留位）；三选二探得通才做：会话结束按「打断次数 / 工具拒绝 / 同一工具连续失败」计分，
-  达标打印一行提示（每会话最多一次）。探不通或排期超限 → 砍掉，在试验记录里写明探测结论。**砍它不阻塞 M9 验收。**
+  skill 里写明「只在用户说『分享给团队』时才真的 contribute」）。
+- [x] **T9.3 门槛**：typecheck + 全量测试绿；端到端：contribute → MR → 合入 → 另一成员 pull → recall 命中该 learning →
+  `--dry-run` 不落任何 git 副作用。
+- [x] **T9.4（stretch）已砍 —— 探测不达线**：先探针——查 claude/codex/qoder-cn 的 Stop 事件与 transcript 可读性
+  （`hookEvents` 表已留位）；三选二探得通才做：会话结束按「打断次数 / 工具拒绝 / 同一工具连续失败」计分
+  （照 teamai 的量纲：单项 ×20、阈值 20、每会话最多一次），达标打印一行提示。
+  探不通或排期超限 → 砍掉，在试验记录里写明探测结论。**砍它不阻塞 M9 验收。**
 - [ ] **T9.5 真机**：完整走一遍「写 learning → contribute → 模拟评审合入 → 临时 HOME 成员 pull → recall 命中」。
   试验记录 + 逐字节还原。
 
 **回滚**：删 `learnings/`（MR）+ 移除镜像记账。
+
+### M7 / M8 / M9 落地状态（2026-10-12）
+
+三个里程碑的代码与测试全部合入工作树，全量门槛 **`npm run typecheck` 0 错误 + `npm test` 52 文件 / 883 例全绿**
+（M6 收尾时是 42 文件 / 725 例）。执行期定下的偏差与遗留项已登记到 §7.2，
+逐条证据在 `docs/trials/2026-10-12-m7-m8-m9-verification.md`。
+
+**内容级真机验证（打开 `/agents` 确认 Claude 真的列出投出去的 agent、开 Qoder CN 会话确认 hook 触发）没有做**，
+登记的原因不是"忘了"，而是这一轮把投递落在你本机 `~/.claude`、`~/.qoder-cn` 上会与当前会话共用配置文件，
+需要单独安排一次带备份的窗口（与 M10 的 Windows 真机遗留项同性质）。目录与文件层面的证据已在夹具里逐字节对拍。
 
 ### M10 · Windows 支持
 
@@ -436,6 +483,46 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 | JSON 合并 | parse→改→重序列化 | 同样 parse→只动 pointer 那一层→按原缩进/结尾换行重序列化 | 整文件重排不可避免，所以"成员改过没有"只比我方条目的规范化文本 |
 | detect | 各工具自己的复杂判定 | 仍然只看根目录存在 | 16 工具后误报面变大，但 `init` 由成员自己勾，不发明新判据 |
 | 卸载留下的空目录 | 按 ownership 记录清理 | 只报告不删 | 分不清是谁建的（`~/.trae/rules` 是原生目录），删了就是动成员目录 |
+| Windows hook 命令引号形态 | 按平台各自 shell 惯例 | 外层双引号包裹 `"<gitbash>" -lc "..."`，内层保持单引号（计划文本写的单引号外层是有意偏差） | cmd.exe 不认单引号，且 Git Bash 路径常含空格（`C:\Program Files\...`）；内层单引号是 `HOOK_COMMAND_MARKER` 与 `parseHookPaths` 的依赖，改不动 |
+| M10 真机验证 | `windows.md` 通篇真机坑 | 代码层 + 注入 platform 单测交付，Windows 真机全量测试与 T10.7 流程登记为遗留项（见 `docs/trials/2026-10-11-m10-trial.md`） | 本环境无 Windows 真机；计划 §6 明示不用 POSIX 测试冒充 Windows 验证 |
+| foreign-entry 的 `--force` 口子 | `--force` 才动 | **暂不接**：apply 层不传 force、`pull --force` 显式跳过 merge，输出文案已声明"受管条目投递不受 --force 影响" | 不开"force 覆盖成员条目"的行为（安全红线相邻）；`merge.ts` 的 force 形参保留但永不生效 |
+
+---
+
+## 7.1 M7/M8/M9 前置决策（2026-10-12 源码级复核后冻结，执行 agent 不要再回到 teamai 的做法）
+
+| 项 | teamai 做法（已核实） | 2.0 做法 | 理由 |
+|---|---|---|---|
+| agents 源格式 | 新格式 `agents/<name>.yaml`（`instructions` 为正文），旧格式 md 只对白名单工具逐字节复制 | 只收 `agents/<name>.md` + frontmatter | 「白名单工具收旧格式、其余收新格式」要维护两份工具名单；md frontmatter 已含 name/description/tools/model |
+| agents 无落点的工具 | Trae / Trae CN / Pi / OpenClaw / Hermes / dsh 的落点表里**根本没有 agents 键** | 这 6 个 `agentsSubdir` 缺席 → 不实现 `planAgents`，delivery 按「没有该能力」跳过 | 与 M6 的 `mcpTarget` 同一条原则：能力有无只由 `paths.ts` 决定，代码里不写工具 id 判断 |
+| Cursor agent 的 frontmatter 键 | 写成 `agent_id` 而不是 `name` | 本轮按 `md` 原样投，落点表 `probe` 点名「未核」 | Cursor 本机未装、无法内容级验证；现在就照抄一个改名分支，验证不了也无从回归 |
+| OpenCode agent | 不写 `name`，强制 `mode: subagent` | 同上，按 `md` 投 + PROBE | 同上 |
+| Codex agent 的 tools | **故意不写 tools** | 照抄：`toml` 形态只出 `name/description/developer_instructions/model` | 这是对方实测后的取舍，我们没有理由重新发明 |
+| Kiro agent | `json` 里注入 `hooks.agentSpawn`（把 hook 藏在 agent 文件里） | 注入不做，只出 `name/description/prompt/model/tools` | 我们 agents 与 hooks 是两条独立链路；混在一起会让「装了什么 hook」无处可查 |
+| agents 删除 | tombstone 文件 `agents/.removed`，pull 时即使仓库无变化也扫全工具删 | 走 MR 删仓库文件，pull 后按 ledger 移除 | 1.0「仓库是唯一真相源」已覆盖；tombstone 是为「本地清理」准备的，我们没有那个场景 |
+| docs 回推 | `scanLocalForPush` 返回空、`remove docs` 不支持 | 照抄：镜像目录不是入库来源，仓库 `docs/` 只能直接提交走 MR | 镜像是投递产物，允许回推等于把「成员本地散文件」当团队资产 |
+| `team-codebase` | 保留名，声明它的 manifest 加载失败 | 沿用禁用 | 我们现在没有 codebase，禁用是给 2.1 留的免费保险 |
+| recall 索引 | `SEARCH_INDEX_VERSION=7` 持久索引 + 域乘子 + hotness + vote + 去重键 | 无索引全文扫描（title ×3 / tags ×2 / 正文 ×1），输出前 5 条 | 数百文件量级；索引那套是为更大规模与采纳统计准备的 |
+| learnings frontmatter | `title/author/date/tags` 必填，tags 须 2–5 个，缺则拒绝 | `title/date/tags` 能补则补，**缺 tags 不拒绝** | 硬要求 tags 会让第一次贡献卡在格式上；我们靠 MR 评审补，不靠校验器 |
+| learnings 文件名 | `<slug>-<YYYY-MM-DD>-<rand6>.md`（rand6 防同人同日撞名） | `learnings/<YYYY-MM-DD>-<slug>.md`，目标已存在则**拒绝并提示改名** | rand6 是为免 MR 的孤儿分支追加写准备的；我们走 MR，撞名会在评审里现形，文件名里塞随机数只会让引用变难 |
+| contribute 落库 | 持久队列 `pending-learnings/` + 孤儿分支 `teamai-learnings` worktree，不碰默认分支 | 复用 1.0 的 push 管线：分支 + MR，人工合入 | 经验入库走评审是这个项目存在的前提；免评审分支等于第二个真相源 |
+
+---
+
+## 7.2 M7/M8/M9 执行期追加（落地时定下，后续改动照此，不要"顺手改回"）
+
+| 项 | teamai / 初稿做法 | 本项目做法 | 理由 |
+|---|---|---|---|
+| `push` 的采集范围 flag | 初稿里 `--agent <工具 id>` | 改名 `--tool <工具 id>`；`--agent <path\|name>` 从 M7 起专指子 Agent 反向采集 | 一个命令里同一个 flag 两种含义（工具 id / 子 Agent 文件）必然出事；`agent` 已成资源类型名，让位给它，范围用 `--tool`。`init --agent <ids>` 不改（那里说的就是"你在用哪些工具"） |
+| 子 Agent 一次 push 混两类资源 | 同一个 MR 里带 | 拒绝：`--agent` 必须单独跑 | 两类互不相干的变更放一个 MR 里，评审看不出彼此影响、回滚也只能一起回 |
+| `planAgents` 的告警出口 | 初稿没留 | 契约加可选 `note`（与 `planMcp` 同形），坏 frontmatter「保留原文投递」逐条点名 | 静默降级会被成员理解成"团队下发了但我没拿到"；这条与 §10 的"跳过要能被看见"同源 |
+| docs/learnings 的资源名 | 裸文件名 | `Resource.name` = kind 根以下的相对路径去扩展名（`be/db-migrations`），`namespace` 字段同时保留 | `resourceKey` 是 ledger 的记账键；并集语义下同名的根条目与 ns 条目都要投，键相同会让停用后的那份**永远删不掉**（不在 active 集合里的那条被另一条顶活着） |
+| 知识镜像的管辖判定 | 初稿没写 | `delivery.ts` 的 `isManaged` 与 `uninstall.ts` 的 `owned` 都并上 `core/knowledge.ts` 的 `isKnowledgePath` | 镜像不在任何工具目录里，适配器 `ownsPath` 天生覆盖不到；漏掉的结果是"停用 ns 后那份文档永久滞留"，而且是**不报错的滞留**。这一条是执行期实测出来的缺陷，哨兵用例在 `test/integration/knowledge.test.ts` |
+| 内置 skill 怎么到人手里 | 靠管理员手抄 | `ejdrone readme` 那一份 MR 同时带上仓库还没有的 `skills/ejdrone-*/SKILL.md`；已存在（哪怕被团队改过）就整条跳过不带 | 命令没人被教过就等于没有；覆盖团队改过的版本等于用工具绕过评审。markdown 仍是唯一来源（`scripts/copy-skills.mjs` 在 build 时复制进 `dist/`，不在 TS 里再抄一份） |
+| Codex 的 agent `.toml` 反向采集 | 做完整 TOML 解析 | 拒绝并点名原因与出路（照 MCP 侧对 TOML 的同一决定） | 我们只做受控的表块拼接，为了 `push` 再引入一个 TOML 解析器不划算 |
+| learning 的分支名 | 用标题 slug | `ejdrone/push-learning-<目标路径短哈希>-` | 中文 slug 进 git ref 名在 Windows 与部分 GitLab 版本上是自找麻烦；分支名是给人看的短串，不需要可读 |
+| T9.4 摩擦提示 | 做 | **砍** | 探测结论：`paths.ts` 只有单值 `hookEvent`（全为 SessionStart），`hookEvents` 数组从未落地；Stop 事件的可读 stdin/transcript 在 claude/codex/qoder-cn 三家里 0 家有据（codex 真机没有 hooks.json）。按"三选二才做"的判据不达线，M9 主线（contribute + recall）不依赖它 |
+| contribute 与 push 的规则重复 | — | 遗留：命名空间歧义判定与 frontmatter 拆分各有一处复刻（`cli/contribute.ts`、`core/learning.ts`） | 契约层那两个函数是模块私有的，子代理按约定不改别人的文件。收口成一处导出的机会在下一轮做，**在那之前改 push 的 ns 规则必须同步改 contribute** |
 
 ---
 
