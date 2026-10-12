@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 
 import { TOOL_PATHS } from '../../src/agents/paths.js';
 import { runCli, type CliContextInput } from '../../src/cli.js';
+import { findGitBash } from '../../src/platform.js';
 
 /**
  * 端到端夹具：真实 git（`git init --bare` 当 origin），绝不 mock child_process。
@@ -75,7 +76,12 @@ export function createHarness(): Harness {
   writeFileSync(emptyConfig, '', 'utf8');
 
   const baseEnv: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH ?? '/usr/bin:/bin',
+    // Windows 上 env 键大小写不敏感，PATH 可能以 Path / path 形态出现（历史遗留的大小写抖动）
+    PATH: process.env.PATH ?? process.env.Path ?? process.env.path ?? '/usr/bin:/bin',
+    // 防向上发现：work 落在某个真实 git 仓库内时（开发机的工作区），`git -C <dir>` 会沿目录树
+    // 向上找到外层仓库，继承它的 user.name/hooks——seed 提交假失败、测试被外层配置污染。
+    // ceiling 只挡"向上找"，不影响 work 之内的 origin.git/seed/repo 各自是仓库。
+    GIT_CEILING_DIRECTORIES: work,
     GIT_CONFIG_GLOBAL: emptyConfig,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_TERMINAL_PROMPT: '0',
@@ -186,6 +192,21 @@ export function createHarness(): Harness {
   };
 }
 
+/**
+ * 按当前 process.platform 推导期望的 hook 命令原文（与 src/cli/constants.ts 的 hookCommand 同形）：
+ * POSIX 是 `EJDRONE_HOOK=1 '<node>' '<cli>' pull --silent`；
+ * win32 找不到 Git Bash 时返回 null —— 那种机器上 init 不装 hook，只打印安装指引，
+ * 调用方据此跳过落盘断言（macOS CI 走的永远是非 null 分支，等价于原有精确断言）。
+ */
+export function expectedHookCommand(env: NodeJS.ProcessEnv): string | null {
+  const node = env.EJDRONE_NODE ?? process.execPath;
+  const cli = env.EJDRONE_CLI ?? '';
+  if (process.platform !== 'win32') return `EJDRONE_HOOK=1 '${node}' '${cli}' pull --silent`;
+  const bash = findGitBash(env);
+  if (bash === null) return null;
+  return `"${bash}" -lc "EJDRONE_HOOK=1 '${node}' '${cli}' pull --silent"`;
+}
+
 /** 标准团队仓库：根条目 + be/fe 两个 namespace + 多文件 skill */
 export function seedTeamRepo(h: Harness): void {
   h.writeSeed('manifest/roles.yaml', ROLES_YAML);
@@ -229,6 +250,66 @@ export function seedMcp(h: Harness): void {
     ].join('\n'),
   );
   h.commitSeed('seed mcp servers');
+}
+
+/**
+ * 往标准仓库里追加团队知识文档（M8 / owner B）：根一份 + be/fe 各一份，
+ * 外加一个 `team-codebase` 保留名目录（采集层必须整目录跳过并告警）。
+ * 单独一个函数而不是塞进 seedTeamRepo —— 与 MCP 那份同理：不让既有端到端断言
+ * 因为与它们无关的原因改动。
+ */
+export function seedDocs(h: Harness): void {
+  h.writeSeed(
+    'docs/deploy.md',
+    '---\ntitle: 发布流程\ntags: [deploy, 发布]\n---\n\n# 发布流程\n\n灰度发布先切 5% 流量，观察十分钟再放量。\n',
+  );
+  h.writeSeed(
+    'docs/be/db-migrations.md',
+    '---\ntitle: 数据库迁移规范\ntags: [mysql, 迁移]\n---\n\n改库必须写迁移脚本，禁止手工 ALTER。\n',
+  );
+  h.writeSeed(
+    'docs/fe/react-style.md',
+    '---\ntitle: 组件拆分优先\ntags: [react]\n---\n\n组件超过两百行就该拆。\n',
+  );
+  // teamai 的 codebase 知识图谱占用过的名字，我们禁用（父计划 §7.1）
+  h.writeSeed('docs/team-codebase/architecture.md', '# 这份文档不该出现在任何人的机器上\n');
+  h.commitSeed('seed docs');
+}
+
+/**
+ * M7（owner A）：往标准仓库追加 agents 条目 —— 根一个（全员）+ be 一个（只有 be 角色收到）。
+ * 与 seedMcp 同理单独成函数：塞进 seedTeamRepo 会波及一堆与 agents 无关的既有断言。
+ * 两个文件都带**完整 frontmatter**，好让 md 落点的期望值能逐字节对拍。
+ */
+export const ROOT_AGENT_FILE = 'agents/review-assistant.md';
+export const ROOT_AGENT_MD =
+  '---\nname: review-assistant\ndescription: 评审助手\ntools: Read, Grep\nmodel: sonnet\n---\n\n# Review assistant\n\n逐步核对改动。\n';
+export const NS_AGENT_FILE = 'agents/be/be-deploy-bot.md';
+export const NS_AGENT_MD =
+  '---\nname: be-deploy-bot\ndescription: 后端部署助手\n---\n\n# BE deploy bot\n\n按清单发布后端。\n';
+
+export function seedAgents(h: Harness): void {
+  h.writeSeed(ROOT_AGENT_FILE, ROOT_AGENT_MD);
+  h.writeSeed(NS_AGENT_FILE, NS_AGENT_MD);
+  h.commitSeed('seed team agents');
+}
+
+/**
+ * M9（owner C）：往标准仓库追加 learnings 条目 —— 根一份（全员）+ be 一份（只有 be 角色收到）。
+ * 文件名沿用 contribute 的落库形状 `<YYYY-MM-DD>-<slug>.md`（slug 允许中文），
+ * 好让"contribute 撞名拒绝"与"镜像路径带日期名"两条端到端断言都用同一套名字。
+ * 与 seedMcp/seedDocs 同理单独成函数：不让既有端到端断言因无关原因改动。
+ */
+export function seedLearnings(h: Harness): void {
+  h.writeSeed(
+    'learnings/2026-10-11-发布流程复盘.md',
+    '---\ntitle: 发布流程复盘\ndate: 2026-10-11\ntags: [发布, deploy]\n---\n\n# 发布流程复盘\n\n上次回滚是因为灰度比例直接拉到了 100%。\n',
+  );
+  h.writeSeed(
+    'learnings/be/2026-10-09-kafka积压处理.md',
+    '---\ntitle: Kafka 积压处理\ndate: 2026-10-09\ntags: [kafka]\n---\n\n# Kafka 积压处理\n\n先扩消费者数量，再排查慢消息。\n',
+  );
+  h.commitSeed('seed learnings');
 }
 
 /**

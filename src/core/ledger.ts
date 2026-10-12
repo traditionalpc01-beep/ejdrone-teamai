@@ -1,6 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash } from 'node:crypto';
+
+import { samePath } from '../platform.js';
 import type { Ledger, LedgerEntry } from './types.js';
 
 export function hashContent(s: string): string {
@@ -82,10 +84,40 @@ export function loadLedger(path: string): { ledger: Ledger; warning?: string } {
 export function saveLedger(path: string, ledger: Ledger): void {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
-  writeFileSync(tmp, `${JSON.stringify(ledger, null, 2)}\n`, 'utf8');
-  renameSync(tmp, path);
+  // 0600 与 saveConfig 对齐：账本内容只有路径 + sha256 + resource key（无明文凭据），
+  // 但状态目录里 config 0600、ledger 0644 并存会让维护者误判，且"0600 收紧"清单不该有例外。
+  // rename 未必保留 tmp 的权限（umask/目标已存在），这里钉死 0600；不支持改权限的文件系统
+  // 上 best-effort，不额外失败。
+  writeFileSync(tmp, `${JSON.stringify(ledger, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+  replaceFileSync(tmp, path);
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    /* 文件系统不支持改权限时不额外失败 */
+  }
+}
+
+/**
+ * tmp → target 的原子替换。POSIX：rename 直接覆盖（原有行为）。
+ * win32：先 best-effort 删掉已存在的 target 再 rename —— Windows 上 rename 覆盖已存在
+ * 文件不可靠（目标被占用/权限姿态不同会 EPERM/EACCES，还与杀毒软件扫描窗口竞争）。
+ * unlink 失败也继续 rename：让 rename 自己报错，不吞真实故障。
+ *
+ * 注意用 unlinkSync(target) 单参而非 { force: true }：fs.unlinkSync 不接受 options
+ * （force 只属于 rmSync），而 try/catch 已经覆盖 ENOENT 等 best-effort 语义。
+ */
+export function replaceFileSync(tmp: string, target: string, platform: NodeJS.Platform = process.platform): void {
+  if (platform === 'win32') {
+    try {
+      unlinkSync(target);
+    } catch {
+      /* 删不掉（不存在/占用/权限）也让 rename 去撞，错误照实抛 */
+    }
+  }
+  renameSync(tmp, target);
 }
 
 export function ledgerEntry(ledger: Ledger, path: string): LedgerEntry | undefined {
-  return ledger.entries.find((e) => e.path === path);
+  // Windows 文件系统大小写不敏感、\ 与 / 等价，账本路径比对必须归一，否则同一文件会被当成两条账。
+  return ledger.entries.find((e) => samePath(e.path, path));
 }

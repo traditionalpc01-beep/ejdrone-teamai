@@ -269,8 +269,13 @@ describe('whichOn（requires 的 PATH 探测，POSIX 先行）', () => {
     expect(whichOn('./fake', { PATH: dir }, 'linux')).toBeNull();
   });
 
-  it('win32：PATHEXT 留给 M10，探测未实现前视为存在（绝不因探不到而跳过 server）', () => {
-    expect(whichOn('anything', HOME_ENV, 'win32')).toBe('anything');
+  it('win32：走 platform 层的 PATHEXT 查找——.exe/.cmd 都认；PATH 上没有 → null', () => {
+    writeFileSync(join(dir, 'fake.exe'), 'MZ', 'utf8');
+    writeFileSync(join(dir, 'runner.cmd'), '@echo off', 'utf8');
+    const env = { PATH: dir, PATHEXT: '.EXE;.CMD' };
+    expect(whichOn('fake', env, 'win32')).toBe(join(dir, 'fake.exe'));
+    expect(whichOn('runner', env, 'win32')).toBe(join(dir, 'runner.cmd'));
+    expect(whichOn('missing-tool', env, 'win32')).toBeNull();
   });
 
   it('空 name 直接 null（非法的可执行名）', () => {

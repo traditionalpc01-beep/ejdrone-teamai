@@ -137,7 +137,7 @@ describe('push --mcp', () => {
     expect(pushed.all).not.toContain(SENTINEL);
   });
 
-  it('同名条目在两个工具里内容不同 → 拒绝并列出两处文件，要求 --agent 缩范围', async () => {
+  it('同名条目在两个工具里内容不同 → 拒绝并列出两处文件，要求 --tool 缩范围', async () => {
     const member = h.member('push-mcp-ambiguous');
     await initMember(member, ['claude', 'qoder-cn']);
     seedLocalClaudeJson(member);
@@ -152,10 +152,10 @@ describe('push --mcp', () => {
     expect(pushed.all).toContain('内容不同');
     expect(pushed.all).toContain(member.path('.claude.json'));
     expect(pushed.all).toContain(member.path('.qoder-cn', 'settings.json'));
-    expect(pushed.all).toContain('--agent');
+    expect(pushed.all).toContain('--tool');
     expect(h.remoteBranches().filter((n) => n.includes('local-weather'))).toEqual([]);
 
-    const narrowed = await member.run(['push', '--mcp', 'local-weather', '--agent', 'claude']);
+    const narrowed = await member.run(['push', '--mcp', 'local-weather', '--tool', 'claude']);
     expect(narrowed.code, narrowed.all).toBe(0);
     expect(narrowed.all).toContain('疑似密钥');
   });
@@ -249,11 +249,14 @@ describe('kind 白名单接到 mcp', () => {
     const member = h.member('kind-mcp');
     await initMember(member, ['claude'], 'be');
 
-    const badRemove = await member.run(['remove', 'docs', 'whatever']);
+    // 负例用 'widgets'：docs / agents / learnings 自 M7-M9 起是合法 kind，
+    // 拿它们当负例测的是"白名单还没接上"，接上之后这条用例就会静默失效。
+    const badRemove = await member.run(['remove', 'widgets', 'whatever']);
     expect(badRemove.code).toBe(1);
     expect(badRemove.all).toContain('mcp');
+    expect(badRemove.all).toContain('agents');
 
-    const badList = await member.run(['list', 'docs']);
+    const badList = await member.run(['list', 'widgets']);
     expect(badList.code).toBe(1);
     expect(badList.all).toContain('mcp');
 

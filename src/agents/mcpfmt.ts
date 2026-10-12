@@ -1,7 +1,5 @@
-import { accessSync, constants, statSync } from 'node:fs';
-import { join } from 'node:path';
-
 import { mcpPayload, resourceKey, type McpServerDef, type Resource, type ResourceKey } from '../core/types.js';
+import { whichWithPathext } from '../platform.js';
 import type { McpTargetStyle } from './paths.js';
 
 /**
@@ -25,31 +23,12 @@ export function mcpMergeResourceKey(id: string): ResourceKey {
 // ------------------------------------------------------------------ requires 探测
 
 /**
- * 在 PATH 上找可执行文件。收敛成这一个可注入函数（M10 的 Windows 层只需在此补 PATHEXT）。
- * POSIX：PATH 各目录里找名为 name 的可执行普通文件。
- * win32：探测未实现前返回 name（视为存在）——「探测不了」不该误判成「不存在」而整条跳过 server，
- * 宁可少探。name 为绝对路径或含 '/' 时不做 PATH 拼接，直接探测该路径本身。
+ * 在 PATH 上找可执行文件。整个实现收口在 src/platform.ts（T10.1），这里只是薄委派：
+ * 不在本文件保留第二份实现 —— 平台逻辑写两份，改一处漏一处正是 AGENTS.md 收口规则想防的事。
+ * 语义（POSIX：':' 分 PATH、只试裸名、要求 X_OK；win32：PATHEXT 后缀匹配）见 whichWithPathext。
  */
 export function whichOn(name: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): string | null {
-  if (name === '') return null;
-  if (platform === 'win32') return name; // TODO(M10)：接 platform 层的 PATHEXT 查找
-  const probe = (candidate: string): string | null => {
-    try {
-      if (!statSync(candidate).isFile()) return null;
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      return null; // 不存在/无权限：换下一个候选，不抛
-    }
-  };
-  if (name.includes('/')) return name.startsWith('/') ? probe(name) : null;
-  const pathValue = env.PATH ?? '';
-  for (const dir of pathValue.split(':')) {
-    if (dir === '') continue;
-    const found = probe(join(dir, name));
-    if (found !== null) return found;
-  }
-  return null;
+  return whichWithPathext(name, env, platform);
 }
 
 // ------------------------------------------------------------ json-mcpServers

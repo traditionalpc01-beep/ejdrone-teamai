@@ -5,7 +5,7 @@ import { applyPlan } from '../core/apply.js';
 import { hashContent, ledgerEntry, loadLedger, saveLedger } from '../core/ledger.js';
 import type { ApplyOutcome, Ledger, PlannedWrite } from '../core/types.js';
 import { debugLogPath, ledgerPath, stateDir } from '../state.js';
-import { acquireLock, lockPath } from './lock.js';
+import { acquireLock, lockPath, STALE_MS } from './lock.js';
 import { requireConfig } from './config.js';
 import { activeResourcesWithConflictHold, buildDelivery, managedRoots, type Delivery } from './delivery.js';
 import { pruneAfterDeletions } from './dirclean.js';
@@ -65,6 +65,11 @@ export async function pullOnce(ctx: CliContext, options: PullOptions = {}): Prom
   // （那个进程会把内容同步好），绝不非零退出 —— hook 失败不该挡住用户开工具。
   if (options.silent) return { code: 0, fatal: false, kept: 0, conflicts: 0 };
   ctx.err(`已有 ejdrone 进程正在同步团队仓库（pid ${lock.holder ?? '未知'}）`);
+  // stale 已改为"持锁人死了才回收"：锁显示活着时大概率真有一个 pull 在跑。
+  // 持有时间超过阈值（休眠/挂起的残留）才额外提醒一句，帮成员判断要不要手动删锁。
+  if (lock.heldMs !== null && lock.heldMs > STALE_MS) {
+    ctx.err(`提示：这把锁已持有约 ${Math.round(lock.heldMs / 60_000)} 分钟——若确认没有别的 ejdrone 在跑，可删除上面的锁文件重试`);
+  }
   ctx.err(`下一步：等它结束再重跑；确认没有进程在跑时删除 ${lockPath(ctx.env)}`);
   return { code: 1, fatal: true, kept: 0, conflicts: 0 };
 }
@@ -161,7 +166,18 @@ async function pullInner(ctx: CliContext, options: PullOptions): Promise<PullOut
     const what = keep.entries && keep.entries.length > 0
       ? `条目 ${keep.entries.map((e) => `"${e}"`).join('、')}`
       : keep.resource;
-    warn(`  保留 ${keep.path}（${what}：${keep.reason === 'modified-locally' ? '本地已修改' : '非本工具投递的文件'}）`);
+    // apply.ts applyMergeWrite 的 !outcome.ok 分支（§3.3 规则 5）：merge 目标文件解析失败/异形
+    // 也走 kept 点名（reason 冻结联合里只能取 'foreign-file'，且不带条目点名）。这一形态与
+    // "非本工具投递的文件"必须分开说 —— 那是我们的目标文件，只是成员侧配置坏了，要指认修法。
+    // 判别签名：mcp 资源 + 无条目点名（规则 6 的 foreign-entry 恒带 entries，不会混淆）。
+    const mergeUnparseable =
+      keep.reason === 'foreign-file' && keep.resource.startsWith('mcp:') && !(keep.entries && keep.entries.length > 0);
+    const reasonText = mergeUnparseable
+      ? 'MCP 配置文件无法解析或形状不认识，本次未投递（已装内容不动；修好该文件后下次 pull 自动恢复）'
+      : keep.reason === 'modified-locally'
+        ? '本地已修改'
+        : '非本工具投递的文件';
+    warn(`  保留 ${keep.path}（${what}：${reasonText}）`);
   }
   for (const path of deleted) emit(`  删除 ${path}`);
 

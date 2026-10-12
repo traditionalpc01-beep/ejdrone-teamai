@@ -13,6 +13,10 @@ const SPELLINGS: Record<ResourceKind, string[]> = {
   rules: ['rules', 'rule'],
   // mcp 的清单文件叫 mcp.yaml，单复数同形；`mcps` 收下单数为兼容，别指望成员写它
   mcp: ['mcp', 'mcps'],
+  // agent 的单数与目录名同形（成员会写 `list agent`），两种都收
+  agents: ['agents', 'agent'],
+  docs: ['docs', 'doc'],
+  learnings: ['learnings', 'learning'],
 };
 
 /** 表里登记的 kind（与 RESOURCE_KINDS 同集，测试钉住）。 */

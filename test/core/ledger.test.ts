@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { hashContent, ledgerEntry, loadLedger, saveLedger } from '../../src/core/ledger.js';
+import { hashContent, ledgerEntry, loadLedger, replaceFileSync, saveLedger } from '../../src/core/ledger.js';
 import type { Ledger } from '../../src/core/types.js';
 
 let root = '';
@@ -128,6 +128,14 @@ describe('saveLedger', () => {
     const leftovers = readdirSync(join(dir, 'nested')).filter((f) => f.includes('.tmp-'));
     expect(leftovers).toEqual([]);
   });
+
+  it('账本落盘组/他人不可读（与 saveConfig 的 0600 对齐；不写死精确位防 umask 干扰）', () => {
+    const dir = tmp();
+    const p = join(dir, 'ledger.json');
+    saveLedger(p, { version: 1, entries: [] });
+    const mode = statSync(p).mode & 0o777;
+    expect(mode & 0o077).toBe(0);
+  });
 });
 
 describe('ledgerEntry', () => {
@@ -141,5 +149,58 @@ describe('ledgerEntry', () => {
     };
     expect(ledgerEntry(ledger, '/b')?.hash).toBe('h2');
     expect(ledgerEntry(ledger, '/c')).toBeUndefined();
+  });
+
+  it('POSIX：大小写不同 / 斜杠不同都算不同文件（找不到）', () => {
+    const ledger: Ledger = {
+      version: 1,
+      entries: [
+        { path: '/a/SKILL.md', hash: 'h1', resource: 'r1', deliveredAt: 't' },
+      ],
+    };
+    expect(ledgerEntry(ledger, '/A/SKILL.md')).toBeUndefined();
+    expect(ledgerEntry(ledger, '/a/SKILL.MD')).toBeUndefined();
+  });
+
+  it('win32 注入：大小写不敏感 + \\ 与 / 等价，同一文件必须认成同一条账', () => {
+    // ledgerEntry 自身不带 platform 参数（收进 samePath 的默认值 = process.platform），
+    // win32 行为靠临时改写 process.platform 注入；POSIX 下 samePath 就是 ===，零影响。
+    const real = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      const ledger: Ledger = {
+        version: 1,
+        entries: [
+          { path: 'c:/users/a/.ejdrone/ledger.json', hash: 'h1', resource: 'r1', deliveredAt: 't' },
+        ],
+      };
+      expect(ledgerEntry(ledger, 'C:\\Users\\A\\.ejdrone\\ledger.json')?.hash).toBe('h1');
+    } finally {
+      Object.defineProperty(process, 'platform', { value: real, configurable: true });
+    }
+  });
+});
+
+describe('replaceFileSync', () => {
+  it('win32 注入：覆盖已存在的 target 成功，内容为新内容', () => {
+    const dir = tmp();
+    const target = join(dir, 'ledger.json');
+    const tmpFile = join(dir, 'ledger.json.tmp-1');
+    writeFileSync(target, 'old', 'utf8');
+    writeFileSync(tmpFile, 'new', 'utf8');
+    replaceFileSync(tmpFile, target, 'win32');
+    expect(readFileSync(target, 'utf8')).toBe('new');
+    expect(existsSync(tmpFile)).toBe(false);
+  });
+
+  it('darwin：POSIX 分支 rename 直接覆盖，行为不变', () => {
+    const dir = tmp();
+    const target = join(dir, 'ledger.json');
+    const tmpFile = join(dir, 'ledger.json.tmp-1');
+    writeFileSync(target, 'old', 'utf8');
+    writeFileSync(tmpFile, 'new', 'utf8');
+    replaceFileSync(tmpFile, target, 'darwin');
+    expect(readFileSync(target, 'utf8')).toBe('new');
+    expect(existsSync(tmpFile)).toBe(false);
   });
 });

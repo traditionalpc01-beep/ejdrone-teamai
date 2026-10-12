@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { namespacesForRoles } from '../core/manifest.js';
+import { repoPathFor } from '../core/plan.js';
 import type { Config, Resource, ResourceKind, RolesManifest } from '../core/types.js';
 import type { CliContext } from './context.js';
 import { requireConfig } from './config.js';
@@ -19,9 +20,9 @@ export interface RemoveOptions {
 }
 
 function repoPath(resource: Resource): string {
-  const root = resource.kind === 'skills' ? 'skills' : 'rules';
-  const base = resource.namespace === '' ? `${root}/${resource.name}` : `${root}/${resource.namespace}/${resource.name}`;
-  return resource.kind === 'skills' ? base : `${base}.md`;
+  // 路径表在 core/plan.ts（KIND_ROOT / KIND_ENTRY_EXT），这里只委派：
+  // 新增 kind 时那一处表补全了这里就自动对，不再用 `kind === 'skills' ? … : …` 猜。
+  return repoPathFor(resource);
 }
 
 // ------------------------------------------------------------------ mcp 专用
@@ -234,10 +235,35 @@ export async function removeCommand(
   const pool = snapshot.kinds[kind];
   const found: Resource[] = [];
   const missing: string[] = [];
+  // agents 专用（照 teamai 语义）：根与 namespace 两处同名时**拒绝并列出**，
+  // 删哪一处会波及不同的人 —— 成员必须用 `<ns>/<name>` 表态，不许我们猜。
+  const ambiguous: Array<{ name: string; paths: string[] }> = [];
   for (const name of names) {
+    if (kind === 'agents' && name.includes('/')) {
+      const idx = name.indexOf('/');
+      const ns = name.slice(0, idx);
+      const base = name.slice(idx + 1);
+      const match = pool.find((resource) => resource.namespace === ns && resource.name === base);
+      if (match) found.push(match);
+      else missing.push(name);
+      continue;
+    }
     const matches = pool.filter((resource) => resource.name === name);
-    if (matches.length === 0) missing.push(name);
-    else found.push(...matches);
+    if (matches.length === 0) {
+      missing.push(name);
+    } else if (kind === 'agents' && matches.length > 1) {
+      ambiguous.push({ name, paths: matches.map((resource) => repoPath(resource)) });
+    } else {
+      found.push(...matches);
+    }
+  }
+  if (ambiguous.length > 0) {
+    for (const item of ambiguous) {
+      ctx.err(`错误：agent「${item.name}」在根与 namespace 两处都有同名条目，删哪一个会波及不同的人：`);
+      for (const path of item.paths) ctx.err(`  - ${path}`);
+    }
+    ctx.err('下一步：改用 ejdrone remove agents <ns>/<name> 指明删哪一处，然后重跑');
+    return 1;
   }
   if (missing.length > 0) {
     ctx.out(`提示：仓库里找不到 ${kind} ${missing.join(', ')}，其余条目照常处理`);

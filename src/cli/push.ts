@@ -1,13 +1,14 @@
 import { createHash } from 'node:crypto';
-import { allResources } from '../core/types.js';import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 
+import { agentPushCommand } from './agentscollect.js';
 import { namespacesForRoles } from '../core/manifest.js';
 import { completeFrontmatter } from '../core/resources.js';
-import type { Config, Resource, ResourceKind } from '../core/types.js';
+import { allResources, type Config, type Resource, type ResourceKind } from '../core/types.js';
 import type { CliContext } from './context.js';
 import { requireConfig } from './config.js';
-import { isValidResourceName } from './constants.js';
+import { BUILTIN_SKILL_NAMES, isValidResourceName } from './constants.js';
 import { collectMcpDefs, type McpCollectedItem } from './mcpcollect.js';
 import { defToEntry, mcpRepoFile, upsertMcpServer } from './mcprepo.js';
 import { candidateKey, readTree, scanLocalAgents } from './local.js';
@@ -22,8 +23,17 @@ export interface PushOptions {
    * `--all` **不**含 mcp，理由写在 collectPending 的注释里。
    */
   mcp?: string[];
-  /** 把 --mcp 的采集范围缩到一个工具 id（同名不同内容时由它表态，不猜） */
-  agent?: string;
+  /**
+   * 子 Agent（M7）：从选定工具的 agents 落点反向采集一个 agent 文件入仓库（可重复），
+   * 值可以是 agent 名也可以是完整路径。各自一个 MR，因此不与 --skill/--rule/--mcp/--all 混用。
+   */
+  agent?: string[];
+  /**
+   * 把 `--mcp` / `--agent` 的采集范围缩到这一个**工具 id**（同名不同内容时由成员表态，不许猜）。
+   * 它不再叫 `--agent`：从 M7 起 agent 是资源类型名（子 Agent），
+   * 同一个命令里一个 flag 两种含义，比多打两个字母贵得多。
+   */
+  tool?: string;
   all?: boolean;
   role?: string;
   /** 显式指定目标 namespace 目录名；角色映射到多个 namespace 时必须用它挑一个 */
@@ -48,6 +58,16 @@ export function buildTargets(
     if (!isValidResourceName(resource.name)) {
       return { files, listed, error: `资源名「${resource.name}」不合法（只允许小写字母、数字、-、_）` };
     }
+    // 内置 skill 的保留名（照 teamai 把 `teamai-recall` 设为永不 push 的做法）：
+    // 成员本地那份可能已被改过，用 push 覆盖等于绕过评审把全员的引导技能换掉。
+    // 要改它仍然可以 —— 直接在团队仓库里改并走 MR，那才是评审兜底的那条路。
+    if (resource.kind === 'skills' && BUILTIN_SKILL_NAMES.includes(resource.name)) {
+      return {
+        files,
+        listed,
+        error: `「${resource.name}」是内置 skill 的保留名，不能用 push 覆盖团队仓库里的那份。`,
+      };
+    }
     const copy: Resource = { ...resource, namespace };
     if (copy.kind === 'skills') {
       const done = completeFrontmatter(copy.files['SKILL.md'] ?? '', copy.name);
@@ -69,11 +89,11 @@ export function buildTargets(
 // ------------------------------------------------------------------ push --mcp
 
 /**
- * MCP 反向采集的落点范围：默认全部选定工具，`--agent` 缩到其中一个。
+ * MCP 反向采集的落点范围：默认全部选定工具，`--tool` 缩到其中一个。
  * 缩范围不是便利功能 —— 同名不同内容时唯一安全的做法是让成员表态（不许猜）。
  */
 function mcpScope(ctx: CliContext, config: Config, options: PushOptions): string[] | null {
-  const requested = (options.agent ?? '').trim();
+  const requested = (options.tool ?? '').trim();
   if (requested === '') {
     if (config.agents.length === 0) {
       ctx.err('错误：还没有选定工具，没有可采集的 MCP 落点。');
@@ -83,7 +103,7 @@ function mcpScope(ctx: CliContext, config: Config, options: PushOptions): string
     return config.agents;
   }
   if (!config.agents.includes(requested)) {
-    ctx.err(`错误：--agent「${requested}」不在你选定的工具里（${config.agents.join(', ') || '无'}）。`);
+    ctx.err(`错误：--tool「${requested}」不在你选定的工具里（${config.agents.join(', ') || '无'}）。`);
     ctx.err('下一步：用 ejdrone list --source local 看得到的工具，或 ejdrone init --force 重选');
     return null;
   }
@@ -353,6 +373,26 @@ async function collectPending(
 }
 
 export async function pushCommand(ctx: CliContext, options: PushOptions): Promise<number> {
+  // `--agent` 走独立 MR：反向采集在 agentscollect.ts 里自带 snapshot 与提交流程。
+  // 不与 --skill/--rule/--mcp 混在同一次调用 —— 混起来就是一个 MR 里两类互不相干的变更，
+  // 评审看不出彼此影响，回滚也只能一起回。
+  if ((options.agent?.length ?? 0) > 0) {
+    const others =
+      (options.skill?.length ?? 0) + (options.rule?.length ?? 0) + (options.mcp?.length ?? 0) > 0 ||
+      options.all === true;
+    if (others) {
+      ctx.err('错误：--agent 要单独跑，不与 --skill/--rule/--mcp/--all 混在同一次 push（各自一个 MR）。');
+      ctx.err('下一步：分两次运行');
+      return 1;
+    }
+    let code = 0;
+    for (const input of options.agent ?? []) {
+      const one = await agentPushCommand(ctx, input, { tool: options.tool, ns: options.ns, role: options.role });
+      if (one !== 0) code = one;
+    }
+    return code;
+  }
+
   const configResult = requireConfig(ctx);
   if (!configResult.ok) {
     ctx.err(`错误：${configResult.error}`);

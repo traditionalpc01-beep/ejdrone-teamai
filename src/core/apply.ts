@@ -1,8 +1,8 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { mergeEntries } from './merge.js';
 import type { MergeOutcome } from './merge.js';
-import { hashContent, ledgerEntry } from './ledger.js';
+import { hashContent, ledgerEntry, replaceFileSync } from './ledger.js';
 import {
   appendBlock,
   blockText,
@@ -187,14 +187,20 @@ function applyMergeWrite(
 ): void {
   if (!packed) return;
   const { group, outcome } = packed;
+  const leader = group.writes[0] as PlannedWrite;
+  const keepResource = (key: string): string => group.keyOwner.get(key) ?? leader.resource;
   if (!outcome.ok) {
-    // §3.3 规则 5：解析失败/异形 → 本次整体跳过该工具，不落盘；账本原样保留（下次 pull 再试）。
+    // §3.3 规则 5：解析失败/异形 → 本次不投递、不改文件；账本原样保留（下次 pull 再试）。
+    // 但绝不能静默：成员会以为团队下发了而自己没拿到。向 kept push 一条，pull 据此点名
+    // 该文件并返回退出码 1（kept 的现成语义，无需改 pull）。
+    // 注意 types.ts 冻结的 KeptFile.reason 只有 'modified-locally' | 'foreign-file' 两个取值，
+    // 结构性文案进不了 reason 字段；取 'foreign-file' 复用点名通道，人类可读的停投原因由
+    // pull.ts 对这一形态（merge 合成资源 + 不带条目点名）单独渲染，见那里的注释。
+    result.kept.push({ path, resource: leader.resource, reason: 'foreign-file' });
     return;
   }
   const delivered = outcome.delivered ?? {};
   const kept = outcome.kept ?? [];
-  const leader = group.writes[0] as PlannedWrite;
-  const keepResource = (key: string): string => group.keyOwner.get(key) ?? leader.resource;
 
   for (const k of kept) {
     result.kept.push({
@@ -229,18 +235,26 @@ function applyMergeWrite(
 }
 
 /**
- * 临时文件 + rename 落盘：半写文件不允许存在。
+ * 临时文件 + replaceFileSync 落盘：半写文件不允许存在。
  * mode 为 null 时尽量保持目标原权限；权限位从临时文件起就是 0600，
  * 收紧场景（含已解析 ${VAR} 值）不会让密钥先以组可读的形态出现在磁盘上。
+ *
+ * 为什么是 replaceFileSync 而不是裸 renameSync（M10）：win32 上 rename 覆盖已存在文件
+ * 不可靠（目标被占用/权限姿态不同会 EPERM/EACCES，还与杀毒软件扫描窗口竞争），而本函数的
+ * 服务对象（~/.claude.json、~/.codex/config.toml）恰是成员机器上必然已存在的共享文件。
+ * replaceFileSync 非 win32 就是 renameSync，POSIX 行为逐字节不变。
  */
 function atomicWriteWithMode(path: string, text: string, mode: number | null): void {
   mkdirSync(dirname(path), { recursive: true });
   const existed = existsSync(path);
   const prevMode = existed ? statSync(path).mode & 0o777 : undefined;
-  const tmp = join(dirname(path), `.${basenameOf(path)}.ejdrone-tmp-${process.pid}`);
+  // 用 node:path 的 basename 而不是手切 '/'：它按运行平台的分隔符切分（win32 认 \ 也认 /）。
+  // 手切会让 Windows 上整个绝对路径塞进临时文件名（含冒号 = 非法文件名，writeFileSync 直接 EINVAL），
+  // 于是所有 MCP merge 写与 0600 收紧写在 Windows 上全部失败。
+  const tmp = join(dirname(path), `.${basename(path)}.ejdrone-tmp-${process.pid}`);
   try {
     writeFileSync(tmp, text, { encoding: 'utf8', mode: 0o600 });
-    renameSync(tmp, path);
+    replaceFileSync(tmp, path);
     const finalMode = mode ?? prevMode;
     if (finalMode !== undefined) chmodSync(path, finalMode);
   } catch (e) {
@@ -251,11 +265,6 @@ function atomicWriteWithMode(path: string, text: string, mode: number | null): v
     }
     throw e;
   }
-}
-
-function basenameOf(path: string): string {
-  const parts = path.split('/');
-  return parts[parts.length - 1] ?? path;
 }
 
 function applyWholeFileWrite(

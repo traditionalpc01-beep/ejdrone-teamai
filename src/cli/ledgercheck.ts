@@ -43,6 +43,23 @@ function mergeFormatFor(path: string): 'json' | 'toml' {
 }
 
 /**
+ * 格式是按扩展名猜的——但真实格式在投递计划里已知，账本（types.ts 冻结）没存它。
+ * 猜错的代价是"明明没改过却判 modified"（doctor 误报，安全方向但烦人）。
+ * 兜底：主格式解析不出我方键的哈希（存在 null）时，用另一种格式再试一次；
+ * 两种都失败才认账本不一致。哈希比对本身不受影响（null ≠ sha256 串）。
+ */
+function resolveEntryHashes(
+  path: string,
+  text: string,
+  keys: string[],
+  primary: Record<string, string | null>,
+): Record<string, string | null> {
+  if (keys.every((key) => primary[key] !== null)) return primary;
+  const alternate = mergeFormatFor(path) === 'json' ? 'toml' : 'json';
+  return currentEntryHashes(alternate, text, keys);
+}
+
+/**
  * merge 记账条目的核对：**逐条目键**比哈希，绝不拿整文件哈希判"本地改过" ——
  * 整文件里还住着成员自己的条目和工具状态字段，整文件哈希永远比不中。
  * 键在文件里找不到 / 文件解析不出 / 异形 → 记入 modified（与 apply 的"宁可不动"同口径）。
@@ -51,7 +68,7 @@ function mergeIntact(entry: LedgerEntry): boolean {
   const text = readText(entry.path);
   const keys = Object.keys(entry.managedKeys ?? {});
   if (text === null) return false;
-  const hashes = currentEntryHashes(mergeFormatFor(entry.path), text, keys);
+  const hashes = resolveEntryHashes(entry.path, text, keys, currentEntryHashes(mergeFormatFor(entry.path), text, keys));
   for (const key of keys) {
     if (hashes[key] !== entry.managedKeys?.[key]) return false;
   }

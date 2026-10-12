@@ -7,7 +7,7 @@ import { commitAll, createBranch, isDirty, listRemoteBranches, prePushScan, push
 import { makeGitProvider } from '../git/provider.js';
 import { newMrWebUrl, parseRepoRef } from '../git/gitlab.js';
 import type { CliContext } from './context.js';
-import { acquireLock, lockPath } from './lock.js';
+import { acquireLock, lockPath, STALE_MS } from './lock.js';
 import type { Snapshot } from './snapshot.js';
 
 export interface MrChange {
@@ -50,6 +50,9 @@ export async function submitMrChange(
   const lock = acquireLock(ctx.env);
   if (!lock.ok) {
     ctx.err(`已有 ejdrone 进程正在同步团队仓库（pid ${lock.holder ?? '未知'}）`);
+    if (lock.heldMs !== null && lock.heldMs > STALE_MS) {
+      ctx.err(`提示：这把锁已持有约 ${Math.round(lock.heldMs / 60_000)} 分钟——若确认没有别的 ejdrone 在跑，可删除上面的锁文件重试`);
+    }
     ctx.err(`下一步：等它结束后重跑；确认没有进程在跑时删除 ${lockPath(ctx.env)}`);
     return { code: 1, branch: null, mrUrl: null };
   }

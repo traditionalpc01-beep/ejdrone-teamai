@@ -482,3 +482,46 @@ describe('currentEntryHashes', () => {
     expect(currentEntryHashes('toml', '[db]\nx = 1\n', ['db']).db).toBeNull(); // 裸 [db] 不是条目形态
   });
 });
+
+// ---------------------------------------------------- 行尾保护（CRLF，QA D4）
+
+describe('mergeEntries 行尾保护（CRLF 成员文件）', () => {
+  const crlf = (s: string): string => s.replace(/\n/g, '\r\n');
+  /** 全文 CRLF 判定：不存在孤立 LF（\r\n 是合法形态，不能盲目替换检查）。 */
+  const allCrlf = (s: string): boolean => (s.match(/(?<!\r)\n/g) ?? []).length === 0;
+
+  it('JSON：CRLF 成员文件投一条 server → 输出保持 CRLF，成员条目内容不变', () => {
+    const current = crlf(claudeFile());
+    const r = mergeEntries(jsonInput({ current, desired: { alpha: '{"command":"npx"}' } }));
+    expect(r.ok).toBe(true);
+    expect(r.changed).toBe(true);
+    // 输出全文 CRLF：成员文件不再被整体翻成 LF（每次 pull 都在改写成员字节）
+    expect(allCrlf(r.text as string)).toBe(true);
+    const doc = JSON.parse(r.text as string) as { mcpServers: Record<string, unknown> };
+    expect(doc.mcpServers).toMatchObject({ personal: { command: 'mine' }, alpha: { command: 'npx' } });
+  });
+
+  it('JSON：CRLF 成员文件撤掉我们那条 → 与投递前逐字节相同（卸载还原成立）', () => {
+    const original = crlf(claudeFile());
+    const r1 = mergeEntries(jsonInput({ current: original, desired: { alpha: '{"command":"npx"}' } }));
+    const previous = r1.delivered as Record<string, string>;
+    const r2 = mergeEntries(jsonInput({ current: r1.text as string, previous, desired: {} }));
+    expect(r2.ok).toBe(true);
+    expect(r2.removed).toEqual(['alpha']);
+    expect(r2.text).toBe(original); // 逐字节还原，不吞结尾换行、不翻行尾
+  });
+
+  it('TOML：CRLF 成员文件投一条 → 成员行保持 CRLF、我方块也是 CRLF；二次 pull 字节不变', () => {
+    const current = crlf(MEMBER_TOML);
+    const desired = { alpha: tomlBlock('alpha', 'url = "https://alpha.example"') };
+    const r1 = mergeEntries(tomlInput({ current, desired }));
+    expect(r1.ok).toBe(true);
+    const after = r1.text as string;
+    expect(allCrlf(after)).toBe(true); // 全文 CRLF（我方块不是孤立 LF）
+    expect(after).toContain('model = "gpt-5"\r\n'); // 成员行原样 CRLF
+    const previous = r1.delivered as Record<string, string>;
+    const r2 = mergeEntries(tomlInput({ current: after, previous, desired }));
+    expect(r2.ok).toBe(true);
+    expect(r2.changed).toBe(false); // 二次幂等：块 canonical 比对已与行尾无关
+  });
+});

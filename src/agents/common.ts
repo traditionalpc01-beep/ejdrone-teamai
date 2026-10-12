@@ -13,6 +13,8 @@ import { referencesEnvVar, resolveMcpResources } from '../core/mcp.js';
 import {
   hookTarget,
   mcpTargetPath,
+  agentsRoot,
+  agentsTarget,
   rulesBlockPath,
   rulesRoot,
   skillsRoot,
@@ -24,6 +26,7 @@ import { planRulesBlock } from './block.js';
 import { planRulesMdc } from './mdc.js';
 import { planRulesDir } from './rulesdir.js';
 import { mcpMergeResourceKey, renderMcpEntries } from './mcpfmt.js';
+import { parseAgentSource, renderAgentChecked } from './agentfmt.js';
 
 /**
  * 16 个适配器的公共层。
@@ -160,14 +163,54 @@ export function planMcpFor(
 }
 
 /**
- * skills 子树 + rules 子树归本适配器管。
+ * skills 子树 + rules 子树 + agents 子树归本适配器管。
  * block / none 模式下 rulesRoot 为 null，所以工具的 AGENTS.md 天然不被 own ——
  * 那是用户共享文件，我们只管它里面的标记区块，绝不整体删除。
+ * agents 目录同理：只有表里给了 agentsSubdir 的工具才认领（卸载不留孤儿，
+ * 没落点的工具绝不把别人的同名目录认成自己的）。
  */
 export function ownsPathFor(id: string, path: string, home: string, env: NodeJS.ProcessEnv): boolean {
   if (under(path, skillsRoot(id, home, env))) return true;
   const rr = rulesRoot(id, home, env);
-  return rr !== null && under(path, rr);
+  if (rr !== null && under(path, rr)) return true;
+  const ar = agentsRoot(id, home, env);
+  return ar !== null && under(path, ar);
+}
+
+/**
+ * 子 Agent 投递（M7）的唯一实现处：适配器一行组装，格式转换全在 agentfmt.ts。
+ * 与 planMcpFor 同一条原则 —— 查 paths.ts 的 agentsTarget：
+ *  - 无落点 → 空数组（该工具不支持 agents 下发；这类适配器干脆不挂 planAgents）；
+ *  - 有落点 → 一 agent 一文件 `<dir>/<name><ext>`，namespace 拍平（agents 是 override 语义，
+ *    name 不含 ns 段，根条目与 ns 条目本来就互斥）；整文件投递沿用 skills 的形状，
+ *    「成员本地改过就不覆盖、只点名」由 core/apply.ts 依 resource 记账免费给出。
+ * completeFrontmatter 的 warning（坏 YAML 保留原文投递）在这里没有出口：
+ * AgentAdapter.planAgents 的冻结签名不带 note 通道，见回报给协调者的契约观察。
+ */
+export function planAgentsFor(
+  id: string,
+  agents: Resource[],
+  home: string,
+  env: NodeJS.ProcessEnv,
+  note?: (message: string) => void,
+): PlannedWrite[] {
+  const target = agentsTarget(id, home, env);
+  if (!target) return [];
+  const writes: PlannedWrite[] = [];
+  for (const agent of agents) {
+    const raw = agent.files['content'] ?? '';
+    const spec = parseAgentSource(raw, agent.name);
+    const rendered = renderAgentChecked(spec, target.format);
+    // 降级必须点名（AGENTS.md §10 相邻红线：跳过不能是静默的）。带上工具 label 是因为
+    // 同一条 agent 会投给多个工具，只写 agent 名的话成员分不清是哪个工具那侧出的问题。
+    if (rendered.warning !== undefined && note) note(`${specOf(id).label}：${rendered.warning}`);
+    writes.push({
+      path: join(target.dir, `${agent.name}${target.ext}`),
+      content: rendered.content,
+      resource: resourceKey('agents', agent.name),
+    });
+  }
+  return writes;
 }
 
 export function installHookFor(

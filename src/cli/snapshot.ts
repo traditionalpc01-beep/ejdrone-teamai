@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 
 import { parseRolesManifest } from '../core/manifest.js';
 import { collectResources } from '../core/resources.js';
-import { defaultBranch, ensureClone, fetchReset } from '../git/repo.js';
+import { defaultBranch, ensureClone, fetchReset, scrubCredentials } from '../git/repo.js';
 import { repoDir } from '../state.js';
 import type { KindSet, RolesManifest } from '../core/types.js';
 import type { CliContext } from './context.js';
@@ -32,7 +32,7 @@ export type SnapshotResult = { ok: true; snapshot: Snapshot } | { ok: false; err
 export async function openSnapshot(ctx: CliContext, repo: string): Promise<SnapshotResult> {
   const dir = repoDir(ctx.env);
   try {
-    await ensureClone(repo, dir, ctx.env);
+    const clone = await ensureClone(repo, dir, ctx.env);
     const branch = await defaultBranch(dir, ctx.env);
     const handle = await fetchReset(dir, branch, ctx.env);
     const parsed = parseRolesManifest(handle.dir);
@@ -46,7 +46,15 @@ export async function openSnapshot(ctx: CliContext, repo: string): Promise<Snaps
         manifest: parsed.manifest,
         manifestError: parsed.error ?? null,
         kinds: collected.kinds,
-        warnings: collected.warnings,
+        // origin 被改写（团队迁了仓库地址）必须让人知道：此前本地一直在同步另一个仓库。
+        // URL 过 scrubCredentials（config.repo 本就是用户可见信息，但不带内嵌凭据）；
+        // pull 与 doctor 都有 warnings 的现成显示通道（"提示："行），不新造机制。
+        warnings: [
+          ...collected.warnings,
+          ...(clone.relinked
+            ? [`本地 checkout 的 origin 已更新为 config 里的仓库地址 ${scrubCredentials(repo)}（此前指向别的仓库）`]
+            : []),
+        ],
         mcpFileError: collected.mcpFileError,
       },
     };

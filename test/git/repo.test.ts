@@ -14,6 +14,7 @@ import {
   isDirty,
   prePushScan,
   push,
+  sameRepoUrl,
   writeFiles,
 } from '../../src/git/repo.js';
 
@@ -64,13 +65,17 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/** 建一个 bare origin，并按 branch 名字推入初始内容 */
-function makeOrigin(branch = 'main', files: Record<string, string> = { 'README.md': '# team\n' }): string {
-  const origin = join(root, 'origin.git');
+/** 建一个 bare origin，并按 branch 名字推入初始内容；name 用于同一 root 里建多个 origin */
+function makeOrigin(
+  branch = 'main',
+  files: Record<string, string> = { 'README.md': '# team\n' },
+  name = 'origin',
+): string {
+  const origin = join(root, `${name}.git`);
   mkdirSync(origin, { recursive: true });
   gitAt(root, 'init', '--bare', '--initial-branch', branch, origin);
 
-  const work = join(root, 'seed');
+  const work = join(root, `seed-${name}`);
   gitAt(root, 'init', '--initial-branch', branch, work);
   for (const [rel, content] of Object.entries(files)) {
     const abs = join(work, rel);
@@ -149,6 +154,36 @@ describe('ensureClone', () => {
 
   it('rejects an unreachable url with a git error, not a hang', async () => {
     await expect(ensureClone(join(root, 'nope.git'), join(root, 'repo'), env)).rejects.toThrow(/clone|fatal/i);
+  });
+
+  it('relinks an existing clone whose origin points somewhere else（F1：换仓库地址不再静默同步旧仓库）', async () => {
+    const originA = makeOrigin('main', { 'README.md': '# team-a\n' }, 'origin-a');
+    const originB = makeOrigin('main', { 'README.md': '# team-b\n' }, 'origin-b');
+    const dir = join(root, 'repo');
+    await ensureClone(originA, dir, env);
+
+    // config 换成 B：ensureClone 必须改写 origin 并如实报告 relinked
+    const first = await ensureClone(originB, dir, env);
+    expect(first).toEqual({ relinked: true });
+    expect(gitAt(dir, 'remote', 'get-url', 'origin').trim()).toBe(originB);
+    // 第二次同一地址：不再 relink
+    const second = await ensureClone(originB, dir, env);
+    expect(second).toEqual({ relinked: false });
+  });
+
+  it('treats the same repo with different credentials / .git suffix / trailing slash as the same origin', async () => {
+    // 归一化比对直接测 sameRepoUrl（导出的纯函数）：本地路径无法内嵌凭据，https 形态在
+    // ensureClone 层测不了（fetch 不可达），纯函数层已覆盖三种等价差异。
+    expect(sameRepoUrl('https://oauth2:tok@host/team/repo.git', 'https://host/team/repo')).toBe(true);
+    expect(sameRepoUrl('/a/origin.git/', '/a/origin')).toBe(true);
+    expect(sameRepoUrl('/a/origin.git', '/a/other')).toBe(false);
+
+    const origin = makeOrigin();
+    const dir = join(root, 'repo');
+    await ensureClone(origin, dir, env);
+    // 尾斜杠等价：不 relink、不 set-url
+    await expect(ensureClone(`${origin}/`, dir, env)).resolves.toEqual({ relinked: false });
+    expect(gitAt(dir, 'remote', 'get-url', 'origin').trim()).toBe(origin);
   });
 
   it('scrubs credentials embedded in the repo url out of error messages', async () => {

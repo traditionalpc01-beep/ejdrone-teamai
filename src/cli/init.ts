@@ -126,6 +126,14 @@ async function pickRoles(
 
 function installHooks(ctx: CliContext, adapters: AgentAdapter[]): void {
   const cmd = hookCommand(ctx.env);
+  // win32 且本机没有 Git for Windows：hook 命令无从构造（bash 是唯一的执行宿主），
+  // 一个都不装，逐工具给出安装指引——不装也不影响手动 ejdrone pull。
+  if (cmd === null) {
+    for (const adapter of adapters) {
+      ctx.out(`hook：${adapter.label} 未安装 —— 需要 Git for Windows（https://git-scm.com/download/win 安装后重跑 ejdrone init --force；不装也不影响手动 ejdrone pull）`);
+    }
+    return;
+  }
   for (const adapter of adapters) {
     const outcome = adapter.installHook(ctx.home, ctx.env, cmd);
     if (outcome.installed) {
@@ -169,6 +177,10 @@ export async function initCommand(ctx: CliContext, repo: string | undefined, opt
     return 1;
   }
   const snapshot = loaded.snapshot;
+  // 与 pull 同一通道显示快照级提示（如 origin 刚被改写：此前本地同步的是另一个仓库）。
+  // init --force 换仓库地址时 openSnapshot 就发生 relink，不在这里显示的话这条提示
+  // 在随后的首次 pull 里已经不会再出现（origin 已一致），成员就无从得知搬过仓库。
+  for (const warning of snapshot.warnings) ctx.out(`提示：${warning}`);
 
   const adapters = await pickAdapters(ctx, options.agent);
   if (adapters === null) return 1;

@@ -43,6 +43,19 @@ describe('upsertHook', () => {
     expect(commands).toContain('other-tool.sh');
   });
 
+  it('atomicWrite 覆盖回归：同一路径连续两次 upsertHook，最终只留新命令', () => {
+    // 第二次 upsert 时 settings.json 已存在，rename 必须可靠覆盖已存在的 target
+    // （win32 上 rename 覆盖不可靠，走 replaceFileSync 的 unlink+rename 分支）。
+    upsertHook(settings, SPEC);
+    const next = { event: 'SessionStart', cmd: 'EJDRONE_HOOK=1 /node2 /cli2.js pull --silent' };
+    upsertHook(settings, next);
+    const parsed = JSON.parse(readFileSync(settings, 'utf8')) as {
+      hooks: { SessionStart: Array<{ hooks: Array<{ command: string }> }> };
+    };
+    expect(parsed.hooks.SessionStart).toHaveLength(1);
+    expect(parsed.hooks.SessionStart[0]?.hooks[0]?.command).toBe(next.cmd);
+  });
+
   it('该事件已被写成非数组形状时拒绝覆盖，而不是丢掉别人的配置', () => {
     writeFileSync(settings, JSON.stringify({ hooks: { SessionStart: 'managed-elsewhere' } }), 'utf8');
     expect(() => upsertHook(settings, SPEC)).toThrow(HookSettingsError);

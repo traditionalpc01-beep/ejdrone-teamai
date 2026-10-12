@@ -1,5 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+
+import { replaceFileSync } from './core/ledger.js';
 
 /**
  * SessionStart 类 hook 的注入与移除。
@@ -94,7 +96,7 @@ function atomicWrite(filePath: string, text: string): void {
   const tmp = `${filePath}.tmp-${process.pid}`;
   if (prevMode === undefined) writeFileSync(tmp, text, 'utf8');
   else writeFileSync(tmp, text, { encoding: 'utf8', mode: prevMode });
-  renameSync(tmp, filePath);
+  replaceFileSync(tmp, filePath);
 }
 
 /** 按原文件的缩进与结尾换行渲染 —— 卸载后才能逐字节回到成员原来的样子。 */

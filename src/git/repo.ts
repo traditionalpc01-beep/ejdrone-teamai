@@ -94,15 +94,54 @@ function realpathOr(value: string): string {
 }
 
 /**
- * dir 不存在 / 不是仓库 → clone；已是仓库 → 只 fetch。
+ * dir 不存在 / 不是仓库 → clone；已是仓库 → 先比对 origin 与传入 url，不一致就 set-url 再 fetch。
  * 不做任何 reset：工作树的同步是 fetchReset 的职责。
+ *
+ * 为什么必须比对 origin（F1）：`init --force <新repo>`（团队迁移仓库地址）后，已是仓库的分支
+ * 原来只 `fetch origin`，从不更新 origin —— 本地 checkout 静默继续同步**旧**仓库：pull 拉旧的、
+ * push 推旧的、doctor `repo` 项验的是旧的却报"可达"。返回 `relinked` 让调用方把这回事告诉用户。
  */
-export async function ensureClone(url: string, dir: string, env?: NodeJS.ProcessEnv): Promise<void> {
+export async function ensureClone(
+  url: string,
+  dir: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<{ relinked: boolean }> {
   if (await isGitRepo(dir, env)) {
+    let current: string | null = null;
+    try {
+      const { stdout } = await git(['-C', dir, 'remote', 'get-url', 'origin'], { env });
+      current = stdout.trim();
+    } catch {
+      // 没有 origin（或读不到）：当作不一致走 set-url（它会创建/更新 origin）
+      current = null;
+    }
+    if (current !== null && sameRepoUrl(current, url)) {
+      await git(['-C', dir, 'fetch', 'origin'], { env });
+      return { relinked: false };
+    }
+    await git(['-C', dir, 'remote', 'set-url', 'origin', url], { env });
     await git(['-C', dir, 'fetch', 'origin'], { env });
-    return;
+    return { relinked: true };
   }
   await git(['clone', url, dir], { env });
+  return { relinked: false };
+}
+
+/**
+ * 两个仓库地址是否指向同一个仓库（归一化比对）。团队迁仓库地址时常伴随三种等价差异，
+ * 不归一就把"同一个仓库"误判成"换了仓库"：
+ * - 内嵌凭据：`https://oauth2:tok@host/x` 与 `https://host/x` 是同一仓库。为什么不能只用
+ *   本文件的 scrubCredentials：它把凭据换成 `***@` 占位，`https://***@host/x` 与
+ *   `https://host/x` 仍不相等 —— 而成员 config 里写带凭据的地址、clone 出来的 origin 就是它；
+ * - 尾部 `/` 与 `.git` 后缀：托管端两种形态都接受。
+ * 本函数只用于比对，返回值不进任何输出，不存在凭据外泄面。
+ */
+export function sameRepoUrl(a: string, b: string): boolean {
+  const normalize = (url: string): string => {
+    const withoutCreds = url.trim().replace(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/[^/@]*@/, '$1://');
+    return withoutCreds.replace(/\/+$/, '').replace(/\.git$/, '');
+  };
+  return normalize(a) === normalize(b);
 }
 
 async function remoteHasBranch(dir: string, branch: string, env?: NodeJS.ProcessEnv): Promise<boolean> {

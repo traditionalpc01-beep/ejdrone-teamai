@@ -100,6 +100,11 @@ mcp/<ns>/mcp.yaml                  只给某角色的 MCP server 清单
 同名条目里 namespace 会**整体替换**根目录版本、不做字段合并 —— 把共享内容误写进某个 namespace，
 激活该 namespace 的成员会同时收到两份，其他人一份都收不到。
 
+\`skills/ejdrone-recall/\` 与 \`skills/ejdrone-share/\` 是**内置引导技能**：由 \`ejdrone readme\` 随本说明书一起补进仓库
+（前者教 agent 动手前先 \`ejdrone recall\` 检索团队既有做法，后者教它把踩坑沉淀成 learning 交给 \`ejdrone contribute\`）。
+它们进仓库后就是普通根技能，与你们自己写的没有任何区别：成员可删可改，想定制就直接改这两个文件并走 MR。
+\`ejdrone push\` 拒绝用同名条目覆盖仓库里的那份（保留名），就是为了不让某个人本地的改动绕过评审变成全员的教材。
+
 ## 怎么提交新内容
 
 \`\`\`bash

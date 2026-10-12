@@ -23,16 +23,20 @@ describe('kind 白名单', () => {
     expect([...cliKinds()].sort()).toEqual([...RESOURCE_KINDS].sort());
   });
 
-  it('单数别名也认（成员会写 skill / rule / mcp）', () => {
+  it('单数别名也认（成员会写 skill / rule / mcp / agent / doc / learning）', () => {
     expect(parseKind('skill')).toBe('skills');
     expect(parseKind('rule')).toBe('rules');
     expect(parseKind('mcp')).toBe('mcp');
     expect(parseKind('mcps')).toBe('mcp');
+    expect(parseKind('agent')).toBe('agents');
+    expect(parseKind('doc')).toBe('docs');
+    expect(parseKind('learning')).toBe('learnings');
     expect(parseKind('  skills  ')).toBe('skills');
   });
 
   it('不认识的写法返回 null，帮助文案随白名单一起变', () => {
-    expect(parseKind('agents')).toBeNull();
+    // 'agents'/'docs'/'learnings' 从 M7/M8/M9 起是合法 kind，负例只能用一个真不存在的词
+    expect(parseKind('widgets')).toBeNull();
     expect(parseKind('')).toBeNull();
     expect(parseKind(undefined)).toBeNull();
     for (const kind of RESOURCE_KINDS) {

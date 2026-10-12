@@ -1,21 +1,37 @@
-import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { isAbsolute, relative } from 'node:path';
 
 import { registry } from '../agents/index.js';
 import { hookTarget, mcpTargetPath } from '../agents/paths.js';
 import { mergeEntries } from '../core/merge.js';
+import { isKnowledgePath } from '../core/knowledge.js';
 import { hasHook } from '../hooks.js';
-import { hashContent, loadLedger, saveLedger } from '../core/ledger.js';
+import { hashContent, loadLedger, replaceFileSync, saveLedger } from '../core/ledger.js';
 import { BLOCK_END, BLOCK_RESOURCE_KEY, BLOCK_START } from '../agents/block.js';
 import { locateRegion, normalizeInner, stripRegion } from '../core/region.js';
 import type { LedgerEntry } from '../core/types.js';
-import { configPath, ledgerPath, loadConfig, stateDir } from '../state.js';
+import { configPath, ledgerPath, loadConfig } from '../state.js';
 import type { CliContext } from './context.js';
 import { managedRoots } from './delivery.js';
 import { pruneAfterDeletions } from './dirclean.js';
 
 export interface UninstallOptions {
   force?: boolean;
+}
+
+/**
+ * 卸载侧的原子写：与 hooks.ts 的 atomicWrite 同款——临时文件按目标原权限创建，
+ * replaceFileSync 落盘（win32 先删后 rename，POSIX 就是 rename）。
+ * 为什么必须原子：这两处写的是成员在用的真实配置（~/.claude.json 一类 22KB 状态文件、
+ * AGENTS.md），中断/崩溃留半写文件 = 直接损坏成员环境；pull 侧的 merge 写早已原子化，
+ * 卸载侧不能是例外。权限不回松：成员 0600 的文件不会因重写一次变成 0644。
+ * 两个调用点都先确认文件可读（current 非 null），所以 statSync 不会 ENOENT。
+ */
+function replaceFileAtomic(filePath: string, text: string): void {
+  const prevMode = statSync(filePath).mode & 0o777;
+  const tmp = `${filePath}.tmp-${process.pid}`;
+  writeFileSync(tmp, text, { encoding: 'utf8', mode: prevMode });
+  replaceFileSync(tmp, filePath);
 }
 
 /**
@@ -69,7 +85,7 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
       ctx.out(`hook：${adapter.label} 已清理`);
     } catch (e) {
       ctx.out(`hook：${adapter.label} 清理失败：${e instanceof Error ? e.message : String(e)}`);
-      ctx.out(`        下一步：手动检查 ${join(stateDir(ctx.env), adapter.id)} 下的 hook 配置文件`);
+      ctx.out(`        下一步：手动检查 ${target.path}（hook 配置文件，在工具自己的目录里）`);
     }
   }
 
@@ -77,7 +93,10 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
   const { ledger, warning } = loadLedger(file);
   if (warning) ctx.out(`提示：${warning}`);
 
-  const owned = (path: string): boolean => adapters.some((adapter) => adapter.ownsPath(path, ctx.home, ctx.env));
+  // 与 delivery.ts 的 isManaged 同一条判据：适配器落点 ∪ 知识镜像根。
+  // 少了镜像根，卸载会把 `~/.ejdrone/knowledge/` 里我们投的文档当别人的文件留下（账本却已清，从此无人认领）。
+  const owned = (path: string): boolean =>
+    adapters.some((adapter) => adapter.ownsPath(path, ctx.home, ctx.env)) || isKnowledgePath(path, ctx.env);
   const removed: LedgerEntry[] = [];
   const stripped: LedgerEntry[] = [];
   const kept: Array<{ entry: LedgerEntry; reason: string }> = [];
@@ -116,7 +135,7 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
       const edited = (outcome.kept ?? []).filter((k) => k.reason === 'modified-locally').map((k) => k.key);
       if (outcome.changed && outcome.text !== undefined) {
         try {
-          writeFileSync(entry.path, outcome.text, 'utf8');
+          replaceFileAtomic(entry.path, outcome.text);
         } catch (e) {
           kept.push({ entry, reason: `写入失败：${e instanceof Error ? e.message : String(e)}` });
           continue;
@@ -154,7 +173,7 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
         continue;
       }
       try {
-        writeFileSync(entry.path, stripRegion(current, loc), 'utf8');
+        replaceFileAtomic(entry.path, stripRegion(current, loc));
         stripped.push(entry);
       } catch (e) {
         kept.push({ entry, reason: `写入失败：${e instanceof Error ? e.message : String(e)}` });
@@ -190,8 +209,12 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
   // 我们从没建过它，删了就是动用户的目录。分不清"谁建的"时，宁可多说一句。
   // 只报选定工具里我们真删过文件的根：uninstall 遍历全注册表，
   // 不过滤会把成员自己机器上原本就有的空目录（如没勾过的工具的 rules 目录）说成"可能是我们建的"。
+  // 目录包含判断不能拼分隔符（root + '/' 在 win32 永远匹配不上反斜杠路径），用 relative 判。
   const touchedRoots = managedRoots(ctx, adapters).filter((root) =>
-    removed.some((entry) => entry.path.startsWith(root + '/')),
+    removed.some((entry) => {
+      const rel = relative(root, entry.path);
+      return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+    }),
   );
   const emptyRoots = touchedRoots.filter(
     (root) => existsSync(root) && readdirSync(root).length === 0,

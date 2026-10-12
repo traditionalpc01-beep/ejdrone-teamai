@@ -27,6 +27,24 @@ export type RulesMode = 'rulesdir' | 'mdc' | 'block' | 'none';
  */
 export type McpTargetStyle = 'json-mcpServers' | 'toml-codex' | 'json-opencode' | 'json-copilot';
 
+/**
+ * 子 Agent（M7）的四种目标形态。与 MCP 的 `style` 同一个道理：**形态写在表里，代码里不猜工具 id**。
+ * - `md` —— Claude 系与 Qoder 系惯例：frontmatter `name/description/tools/model` + 正文
+ * - `agent-md` —— Copilot：文件名 `<name>.agent.md`，内容同 md
+ * - `toml` —— Codex：`name/description/developer_instructions/model`，**故意不写 tools**（照 teamai 实测结论）
+ * - `json` —— Kiro：`name/description/prompt/model/tools`；teamai 还往里注入 `hooks.agentSpawn`，
+ *   我们不做（agents 与 hooks 是两条链路，混在一起会让「装了什么 hook」无处可查）
+ */
+export type AgentsFormat = 'md' | 'agent-md' | 'toml' | 'json';
+
+/** 每种形态的落点文件扩展名（`agent-md` 是双段扩展名，拍平与卸载都要用它）。 */
+export const AGENTS_EXT: Record<AgentsFormat, string> = {
+  md: '.md',
+  'agent-md': '.agent.md',
+  toml: '.toml',
+  json: '.json',
+};
+
 export interface ToolPathSpec {
   id: string;
   label: string;
@@ -58,6 +76,14 @@ export interface ToolPathSpec {
     homeFile?: string;
     pointer: string[];
   };
+  /**
+   * 子 Agent 落点（M7）：相对工具根的目录，团队 agent 文件按 `agentsFormat` 转换后落在这里，
+   * 一个 agent 一个文件（`<name><AGENTS_EXT[format]>`，namespace 拍平）。
+   * **缺席 = 该工具没有用户级 agents 落点**，适配器不实现 `planAgents`，delivery 按「没有该能力」跳过
+   * （与 `mcpTarget` 同一条原则：能力有无只由这张表决定，代码里不写工具 id 判断）。
+   */
+  agentsSubdir?: string;
+  agentsFormat?: AgentsFormat;
   /** 待真机确认的说明 */
   probe?: string;
 }
@@ -74,7 +100,9 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     hookFile: 'settings.json',
     hookEvent: 'SessionStart',
     mcpTarget: { format: 'json', style: 'json-mcpServers', homeFile: '.claude.json', pointer: ['mcpServers'] },
-    probe: '已真机核对(2026-10-11 M5 试验)：~/.claude/skills 投递正常、settings.json 里用户已有的 SessionEnd/Stop 条目不被动、我们那条 SessionStart 幂等；卸载后 settings.json 逐字节回到原样（缩进与结尾换行跟随原文件）。MCP 落点已真机核对：~/.claude.json 顶层就有 mcpServers 表（本机有 4 条成员自己的 server）。rules 目录名沿用投递矩阵（真机无原生 rules 目录，由本工具创建）',
+    agentsSubdir: 'agents',
+    agentsFormat: 'md',
+    probe: '已真机核对(2026-10-11 M5 试验)：~/.claude/skills 投递正常、settings.json 里用户已有的 SessionEnd/Stop 条目不被动、我们那条 SessionStart 幂等；卸载后 settings.json 逐字节回到原样（缩进与结尾换行跟随原文件）。MCP 落点已真机核对：~/.claude.json 顶层就有 mcpServers 表（本机有 4 条成员自己的 server）。rules 目录名沿用投递矩阵（真机无原生 rules 目录，由本工具创建）。agents 落点已真机核对(2026-10-12)：~/.claude/agents 存在且有工具自家 subagent .md（frontmatter name/description/tools/model），md 投递的目录与文件形状确认；/agents 里可见可用属 T7.8 真机项',
   },
   'qoder-cn': {
     id: 'qoder-cn',
@@ -87,7 +115,9 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     hookFile: 'settings.json',
     hookEvent: 'SessionStart',
     mcpTarget: { format: 'json', style: 'json-mcpServers', file: 'settings.json', pointer: ['mcpServers'] },
-    probe: '已真机核对(2026-10-11 M5 试验)：投递到 ~/.qoder-cn/skills 的技能真的被 Qoder CN 读到了 —— 新会话的可用技能列表里出现了仓库刚投递的 trial-note/trial-ns，属内容级证据（1.0 只核到目录存在）。settings.json 的 hook 条目写入/卸载均正常（是否被 Qoder 触发仍未证）。MCP 落点已真机核对：~/.qoder-cn/settings.json 顶层有 mcpServers（本机有一条 GitHub）。未核对：rules 目录是否被读取',
+    agentsSubdir: 'agents',
+    agentsFormat: 'md',
+    probe: '已真机核对(2026-10-11 M5 试验)：投递到 ~/.qoder-cn/skills 的技能真的被 Qoder CN 读到了 —— 新会话的可用技能列表里出现了仓库刚投递的 trial-note/trial-ns，属内容级证据（1.0 只核到目录存在）。settings.json 的 hook 条目写入/卸载均正常（是否被 Qoder 触发仍未证）。MCP 落点已真机核对：~/.qoder-cn/settings.json 顶层有 mcpServers（本机有一条 GitHub）。未核对：rules 目录是否被读取；agents 落点未核对（2026-10-12 真机 ~/.qoder-cn 下没有 agents/ 目录，落点照表由本工具创建，是否为 Qoder CN 的读取目录待真机，保留 PROBE）',
   },
   cursor: {
     id: 'cursor',
@@ -100,7 +130,9 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     hookFile: 'hooks.json',
     hookEvent: 'sessionStart',
     mcpTarget: { format: 'json', style: 'json-mcpServers', file: 'mcp.json', pointer: ['mcpServers'] },
-    probe: '本机未安装 Cursor，未核对，保留 PROBE：rootRel/.cursor、skills 落点与 hook 事件名（随版本变化）均待真机确认；installHook 采取照表尝试、任何失败降级为 installed:false。MCP 落点 ~/.cursor/mcp.json 照 teamai 文档，未核',
+    agentsSubdir: 'agents',
+    agentsFormat: 'md',
+    probe: '本机未安装 Cursor，未核对，保留 PROBE：rootRel/.cursor、skills 落点与 hook 事件名（随版本变化）均待真机确认；installHook 采取照表尝试、任何失败降级为 installed:false。MCP 落点 ~/.cursor/mcp.json 照 teamai 文档，未核。agents 落点 ~/.cursor/agents 照 teamai 文档，未核，保留 PROBE；另记：teamai 对 Cursor 把 frontmatter 键改写成 agent_id（不是 name），本轮按 md 原样投递、不做键改写，待真机确认 Cursor 到底读哪个键',
   },
   codex: {
     id: 'codex',
@@ -112,7 +144,9 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     hookFile: 'hooks.json',
     hookEvent: 'SessionStart',
     mcpTarget: { format: 'toml', style: 'toml-codex', file: 'config.toml', pointer: ['mcp_servers'] },
-    probe: '已真机核对(2026-10-11)：~/.codex/skills 与 AGENTS.md 均存在（skills 与 block 落点确认）。注：真机另有原生 ~/.codex/rules 目录，但投递矩阵规定 codex 走 AGENTS.md 区块。MCP 落点已真机核对：~/.codex/config.toml 用 [mcp_servers.<name>] 表（本机已有成员手写若干条，含 .env 子表）。hook 落点 hooks.json 未核对（真机只见 config.toml，无 hooks.json），保留 PROBE',
+    agentsSubdir: 'agents',
+    agentsFormat: 'toml',
+    probe: '已真机核对(2026-10-11)：~/.codex/skills 与 AGENTS.md 均存在（skills 与 block 落点确认）。注：真机另有原生 ~/.codex/rules 目录，但投递矩阵规定 codex 走 AGENTS.md 区块。MCP 落点已真机核对：~/.codex/config.toml 用 [mcp_servers.<name>] 表（本机已有成员手写若干条，含 .env 子表）。hook 落点 hooks.json 未核对（真机只见 config.toml，无 hooks.json），保留 PROBE。agents 落点未核对：2026-10-12 真机 ~/.codex 下没有 agents/ 目录，<name>.toml 的落点与"是否被 Codex 列出"照 teamai 记载，待真机（T7.8），保留 PROBE；toml 形态故意不写 tools（teamai 实测结论）',
   },
   dsh: {
     id: 'dsh',
@@ -137,7 +171,9 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     hookFile: 'settings.json',
     hookEvent: 'SessionStart',
     mcpTarget: { format: 'json', style: 'json-mcpServers', file: 'mcp.json', pointer: ['mcpServers'] },
-    probe: '已真机核对(2026-10-11)：~/.qoder/skills 存在，skills 落点确认；MCP 落点已真机核对 —— ~/.qoder/mcp.json 顶层就是 mcpServers（空表，形状与 Claude 兼容）。未核对：~/.qoder 下无 rules 目录（由本工具创建，Qoder 是否读取未知）、settings.json 存在但没有 hooks 键（Qoder 国际版是否按 Claude 兼容形读 SessionStart 待真机）',
+    agentsSubdir: 'agents',
+    agentsFormat: 'md',
+    probe: '已真机核对(2026-10-11)：~/.qoder/skills 存在，skills 落点确认；MCP 落点已真机核对 —— ~/.qoder/mcp.json 顶层就是 mcpServers（空表，形状与 Claude 兼容）。agents 落点部分核对(2026-10-12)：~/.qoder/agents 存在且含工具自家生成的 .md agent（目录级确认，"我们投的 md 是否被读取"未证）。未核对：~/.qoder 下无 rules 目录（由本工具创建，Qoder 是否读取未知）、settings.json 存在但没有 hooks 键（Qoder 国际版是否按 Claude 兼容形读 SessionStart 待真机）',
   },
   copilot: {
     id: 'copilot',
@@ -148,7 +184,9 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rulesMode: 'block',
     rulesBlockFile: 'AGENTS.md',
     mcpTarget: { format: 'json', style: 'json-copilot', file: 'mcp-config.json', pointer: ['mcpServers'] },
-    probe: '本机未安装 GitHub Copilot CLI，未核对，保留 PROBE：rootRel ~/.copilot 与 COPILOT_HOME 覆盖照 teamai 文档；skills 子目录、AGENTS.md 区块均未核。MCP 落点 $COPILOT_HOME/mcp-config.json 照 teamai 文档，其条目要带 tools:["*"] 且 stdio 写成 type:"local"，未核。无用户级 hook 落点（teamai 只记载项目级 .github/hooks/，且 Copilot 不读 ~/.claude/settings.json），故不设 hookFile',
+    agentsSubdir: 'agents',
+    agentsFormat: 'agent-md',
+    probe: '本机未安装 GitHub Copilot CLI，未核对，保留 PROBE：rootRel ~/.copilot 与 COPILOT_HOME 覆盖照 teamai 文档；skills 子目录、AGENTS.md 区块均未核。MCP 落点 $COPILOT_HOME/mcp-config.json 照 teamai 文档，其条目要带 tools:["*"] 且 stdio 写成 type:"local"，未核。无用户级 hook 落点（teamai 只记载项目级 .github/hooks/，且 Copilot 不读 ~/.claude/settings.json），故不设 hookFile。agents 落点 ~/.copilot/agents/<name>.agent.md 照 teamai 文档，未核，保留 PROBE（内容同 md，仅文件名双段扩展）',
   },
   codebuddy: {
     id: 'codebuddy',
@@ -159,7 +197,9 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     hookFile: 'settings.json',
     hookEvent: 'SessionStart',
     mcpTarget: { format: 'json', style: 'json-mcpServers', file: '.mcp.json', pointer: ['mcpServers'] },
-    probe: '已真机核对(2026-10-11)：~/.codebuddy/skills 存在且含工具自家 skill 目录，skills 落点确认。待真机：该机器上没有 ~/.codebuddy/settings.json，hookFile/hookEvent 照 CodeBuddy 的 Claude 兼容血统推断；无原生 markdown rules 目录，rules 置 none。MCP 照 teamai 记载 CodeBuddy 只读三个文件里的第一个（.mcp.json → mcp.json → ~/.codebuddy.json），我们只写首选 ~/.codebuddy/.mcp.json，那套"读哪个看先后"的搬迁逻辑不做，留 PROBE',
+    agentsSubdir: 'agents',
+    agentsFormat: 'md',
+    probe: '已真机核对(2026-10-11)：~/.codebuddy/skills 存在且含工具自家 skill 目录，skills 落点确认。待真机：该机器上没有 ~/.codebuddy/settings.json，hookFile/hookEvent 照 CodeBuddy 的 Claude 兼容血统推断；无原生 markdown rules 目录，rules 置 none。MCP 照 teamai 记载 CodeBuddy 只读三个文件里的第一个（.mcp.json → mcp.json → ~/.codebuddy.json），我们只写首选 ~/.codebuddy/.mcp.json，那套"读哪个看先后"的搬迁逻辑不做，留 PROBE。agents 落点未核对：2026-10-12 真机 ~/.codebuddy 下没有 agents/ 目录，落点照表由本工具创建，保留 PROBE',
   },
   workbuddy: {
     id: 'workbuddy',
@@ -170,7 +210,9 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     hookFile: 'settings.json',
     hookEvent: 'SessionStart',
     mcpTarget: { format: 'json', style: 'json-mcpServers', file: 'mcp.json', pointer: ['mcpServers'] },
-    probe: '已真机核对(2026-10-11)：~/.workbuddy/skills 存在，skills 落点确认；MCP 落点已真机核对 —— ~/.workbuddy/mcp.json 顶层是 mcpServers（空表）。未核对：~/.workbuddy/settings.json 存在但只有 app 状态键（enabledPlugins/claw/sandbox/skillOverrides…），无 hooks 键，是否按 Claude 兼容形读 hook 待真机；无 markdown rules 目录，rules 置 none',
+    agentsSubdir: 'agents',
+    agentsFormat: 'md',
+    probe: '已真机核对(2026-10-11)：~/.workbuddy/skills 存在，skills 落点确认；MCP 落点已真机核对 —— ~/.workbuddy/mcp.json 顶层是 mcpServers（空表）。未核对：~/.workbuddy/settings.json 存在但只有 app 状态键（enabledPlugins/claw/sandbox/skillOverrides…），无 hooks 键，是否按 Claude 兼容形读 hook 待真机；无 markdown rules 目录，rules 置 none。agents 落点未核对：2026-10-12 真机 ~/.workbuddy 下没有 agents/ 目录，落点照表由本工具创建，保留 PROBE',
   },
   opencode: {
     id: 'opencode',
@@ -180,7 +222,9 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rulesMode: 'block',
     rulesBlockFile: 'AGENTS.md',
     mcpTarget: { format: 'json', style: 'json-opencode', file: 'opencode.json', pointer: ['mcp'] },
-    probe: '本机未安装 OpenCode（无 ~/.config/opencode），未核对，保留 PROBE：rootRel 用多级 ~/.config/opencode（照 teamai 的 opencode.json 位置）；skills 子目录与 AGENTS.md 区块均未核。MCP 照 teamai 落在共享 opencode.json 的 mcp 键（stdio 写成 type:"local"，远程写 type:"remote"），未核。无用户级 JSON hook 落点可复用我们的 upsertHook 形状，故不设 hookFile',
+    agentsSubdir: 'agents',
+    agentsFormat: 'md',
+    probe: '本机未安装 OpenCode（无 ~/.config/opencode），未核对，保留 PROBE：rootRel 用多级 ~/.config/opencode（照 teamai 的 opencode.json 位置）；skills 子目录与 AGENTS.md 区块均未核。MCP 照 teamai 落在共享 opencode.json 的 mcp 键（stdio 写成 type:"local"，远程写 type:"remote"），未核。无用户级 JSON hook 落点可复用我们的 upsertHook 形状，故不设 hookFile。agents 落点 ~/.config/opencode/agents 照 teamai 文档，未核，保留 PROBE；另记：teamai 对 OpenCode 不写 name 且强制 frontmatter mode: subagent，本轮按 md 原样投递、不做键改写，待真机确认，保留 PROBE',
   },
   pi: {
     id: 'pi',
@@ -206,7 +250,9 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     skillsSubdir: 'skills',
     rulesMode: 'none',
     mcpTarget: { format: 'json', style: 'json-mcpServers', file: 'settings/mcp.json', pointer: ['mcpServers'] },
-    probe: '已真机核对(2026-10-11)：~/.kiro/skills 存在且含工具自家 skill 目录，skills 落点确认。不设 hook：teamai 记载 Kiro 的 SessionStart 由 agent 同步以 hooks.agentSpawn 内嵌，只存在于已同步的 agent 中，无用户级 JSON 落点。rules 置 none（~/.kiro 下无 rules/ 也无 AGENTS.md）。MCP 落点 ~/.kiro/settings/mcp.json 照 Kiro 官方文档与 teamai 表，本机该目录不存在，未核',
+    agentsSubdir: 'agents',
+    agentsFormat: 'json',
+    probe: '已真机核对(2026-10-11)：~/.kiro/skills 存在且含工具自家 skill 目录，skills 落点确认。不设 hook：teamai 记载 Kiro 的 SessionStart 由 agent 同步以 hooks.agentSpawn 内嵌，只存在于已同步的 agent 中，无用户级 JSON 落点。rules 置 none（~/.kiro 下无 rules/ 也无 AGENTS.md）。MCP 落点 ~/.kiro/settings/mcp.json 照 Kiro 官方文档与 teamai 表，本机该目录不存在，未核。agents 落点未核对：2026-10-12 真机 ~/.kiro 下没有 agents/ 目录，<name>.json 落点照 teamai 文档，保留 PROBE；teamai 往 json 注入 hooks.agentSpawn，我们有意不做（agents 与 hooks 两条链路，见 paths.ts 顶部注释）',
   },
   trae: {
     id: 'trae',
@@ -298,6 +344,29 @@ export function mcpTargetPath(
     style: target.style,
     pointer: target.pointer,
   };
+}
+
+/**
+ * 子 Agent 落点（M7）。null = 该工具没有用户级 agents 落点，团队的 `agents/` 不下发给它。
+ * 与 `mcpTargetPath` 同形：适配器查这一个函数决定「有没有能力 + 投成什么形态」，不自己判断。
+ */
+export function agentsTarget(
+  id: string,
+  home: string,
+  env: NodeJS.ProcessEnv,
+): { dir: string; format: AgentsFormat; ext: string } | null {
+  const spec = spec_(id);
+  if (!spec.agentsSubdir || !spec.agentsFormat) return null;
+  return {
+    dir: join(toolRoot(id, home, env), spec.agentsSubdir),
+    format: spec.agentsFormat,
+    ext: AGENTS_EXT[spec.agentsFormat],
+  };
+}
+
+/** agents 目录绝对路径；无落点返回 null（managedRoots 用它收空壳）。 */
+export function agentsRoot(id: string, home: string, env: NodeJS.ProcessEnv): string | null {
+  return agentsTarget(id, home, env)?.dir ?? null;
 }
 
 function spec_(id: string): ToolPathSpec {

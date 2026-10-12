@@ -3,7 +3,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -12,6 +11,7 @@ import { dirname, join } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { z } from 'zod';
 
+import { replaceFileSync } from './core/ledger.js';
 import type { Config } from './core/types.js';
 
 /**
@@ -25,6 +25,7 @@ const CONFIG_FILE = 'config.yaml';
 const LEDGER_FILE = 'ledger.json';
 const REPO_DIR_NAME = 'repo';
 const DEBUG_LOG_FILE = 'debug.log';
+const KNOWLEDGE_DIR_NAME = 'knowledge';
 
 function resolveEnv(env: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
   return env ?? process.env;
@@ -56,6 +57,25 @@ export function repoDir(env?: NodeJS.ProcessEnv): string {
 
 export function debugLogPath(env?: NodeJS.ProcessEnv): string {
   return join(stateDir(env), DEBUG_LOG_FILE);
+}
+
+/**
+ * 团队知识镜像根目录（M8/M9）：`docs/` 与 `learnings/` 的投递落点，`ejdrone recall` 只读这里。
+ *
+ * 为什么不投进各工具目录（对标 teamai 也是镜像到单一本地目录、只被 recall 索引）：
+ * 16 个工具没有一个统一的知识落点，硬凑就成了「只有某个工具能读到团队知识」。
+ * 镜像 + recall 是不依赖工具私语的形态。
+ */
+export function knowledgeDir(env?: NodeJS.ProcessEnv): string {
+  return join(stateDir(env), KNOWLEDGE_DIR_NAME);
+}
+
+export function knowledgeDocsDir(env?: NodeJS.ProcessEnv): string {
+  return join(knowledgeDir(env), 'docs');
+}
+
+export function knowledgeLearningsDir(env?: NodeJS.ProcessEnv): string {
+  return join(knowledgeDir(env), 'learnings');
 }
 
 /**
@@ -114,7 +134,7 @@ export function saveConfig(config: Config, env?: NodeJS.ProcessEnv): void {
   const tmp = `${path}.tmp-${process.pid}`;
   try {
     writeFileSync(tmp, stringifyConfig(config), { encoding: 'utf8', mode: 0o600 });
-    renameSync(tmp, path);
+    replaceFileSync(tmp, path);
   } catch (e) {
     try {
       rmSync(tmp, { force: true });

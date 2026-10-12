@@ -120,6 +120,15 @@ describe('saveConfig / loadConfig', () => {
     expect(leftovers).toEqual([]);
   });
 
+  it('覆盖已存在的 config：新内容正确且权限仍为 0600（POSIX 行为回归）', () => {
+    saveConfig(base, env);
+    const updated: Config = { ...base, primaryRole: 'backend', agents: ['claude'] };
+    saveConfig(updated, env);
+
+    expect(loadConfig(env).config).toEqual(updated);
+    expect(statSync(configPath(env)).mode & 0o777).toBe(0o600);
+  });
+
   it('returns { config: null } with no error when the file does not exist', () => {
     expect(loadConfig(env)).toEqual({ config: null });
   });

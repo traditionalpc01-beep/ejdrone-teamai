@@ -253,4 +253,36 @@ describe('MCP 投递与成员内容共存', () => {
     expect(member.exists('.trae', 'mcp.json')).toBe(false);
     expect(member.exists('.trae', 'mcp', 'mcp.json')).toBe(false);
   });
+
+  it('第二个工具同样收到条目：qoder 的 mcp.json 落进团队 server（13 个未深测工具的抽样覆盖）', async () => {
+    const member = h.member('mcp-second-tool');
+    await initMember(member, ['claude', 'qoder'], 'be', TOKEN_ENV);
+
+    const qoder = JSON.parse(member.read('.qoder', 'mcp.json')) as {
+      mcpServers: Record<string, { command?: string; args?: string[]; url?: string }>;
+    };
+    expect(qoder.mcpServers['shared-formatter']?.command).toBe('npx');
+    expect(qoder.mcpServers['shared-formatter']?.args).toEqual(['-y', '@acme/formatter-mcp']);
+    // be 角色的 http 条目同样到达第二个工具
+    expect(qoder.mcpServers['be-metrics']?.url).toBe('https://metrics.example.com/mcp');
+  });
+
+  it('成员侧 MCP 配置文件损坏：pull 点名"无法解析"并返回退出码 1，文件一字节不动（§3.3 规则 5）', async () => {
+    const member = h.member('mcp-corrupt');
+    installTools(member, ['claude']);
+    member.write('.claude.json', '{ broken LEAK-CANARY');
+    // init 的首次 pull 会遇到坏文件：按新语义点名但不失败（init 自己返回 0 + 提示）
+    const init = await member.run(['init', h.origin, '--agent', 'claude', '--role', 'be'], {
+      env: withEnv(member, TOKEN_ENV),
+    });
+    expect(init.code, init.all).toBe(0);
+    expect(init.all).toContain('无法解析');
+
+    const pull = await member.run(['pull']);
+    expect(pull.code).toBe(1);
+    expect(pull.all).toContain('MCP 配置文件无法解析或形状不认识');
+    expect(pull.all).toContain('.claude.json');
+    // 成员文件一字节不动：没有覆盖、没有清空、没有半写
+    expect(member.read('.claude.json')).toBe('{ broken LEAK-CANARY');
+  });
 });

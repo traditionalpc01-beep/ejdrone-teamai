@@ -1,6 +1,8 @@
 import { registry } from '../agents/index.js';
-import { rulesRoot, skillsRoot } from '../agents/paths.js';
+import { agentsRoot, rulesRoot, skillsRoot } from '../agents/paths.js';
+import { isKnowledgePath, planKnowledge } from '../core/knowledge.js';
 import { activeNamespaces, resolve } from '../core/plan.js';
+import { knowledgeDir } from '../state.js';
 import {
   type AgentAdapter,
   type Config,
@@ -50,7 +52,12 @@ export function managedRoots(ctx: CliContext, adapters: AgentAdapter[]): string[
     roots.push(skillsRoot(adapter.id, ctx.home, ctx.env));
     const rr = rulesRoot(adapter.id, ctx.home, ctx.env);
     if (rr !== null) roots.push(rr);
+    const ar = agentsRoot(adapter.id, ctx.home, ctx.env);
+    if (ar !== null) roots.push(ar);
   }
+  // 团队知识镜像与工具无关（core/knowledge.ts），但它一样是我们记账的文件，
+  // 清空后留下的空壳目录得在收壳清单里，否则卸载后 ~/.ejdrone/knowledge 空着挂在那儿。
+  roots.push(knowledgeDir(ctx.env));
   return roots;
 }
 
@@ -89,10 +96,23 @@ export function buildDelivery(ctx: CliContext, config: Config, snapshot: Snapsho
     if (!halted.has('mcp') && adapter.planMcp) {
       writes.push(...adapter.planMcp(resolution.kinds.mcp, ctx.home, ctx.env, (message) => notes.push(message)));
     }
+    // 子 Agent 与 MCP 同一条原则：能力有无只由 paths.ts 决定（`agentsSubdir` 缺席 → 不实现 planAgents），
+    // 这里绝不再问一遍"这个工具是不是没有 agents 目录"。
+    if (!halted.has('agents') && adapter.planAgents) {
+      writes.push(...adapter.planAgents(resolution.kinds.agents, ctx.home, ctx.env, (message) => notes.push(message)));
+    }
   }
 
+  // 团队知识镜像（docs + learnings）：一次出齐，落点与选定了哪些工具无关。
+  // 这里不需要按 halted 跳过 —— resolve() 对停发的 kind 已经把候选集清成空数组（core/plan.ts），
+  // 于是既不产生新写；而"停发 ≠ 删除"由 activeResourcesWithConflictHold 把账本里的条目补回 active 保证。
+  writes.push(...planKnowledge(resolution.kinds, ctx.env));
+
+  // 管辖范围 = 各适配器落点 ∪ 知识镜像根。镜像不在任何工具目录里，少了后半句，
+  // apply 的删除分支会认不出它（isManaged 为 false 就跳过删除），于是「停用 namespace 后删掉那份文档」
+  // 永远做不到 —— 账本记着、候选集没有，文件却永久滞留。
   const isManaged = (path: string): boolean =>
-    adapters.some((adapter) => adapter.ownsPath(path, ctx.home, ctx.env));
+    adapters.some((adapter) => adapter.ownsPath(path, ctx.home, ctx.env)) || isKnowledgePath(path, ctx.env);
 
   return {
     writes,

@@ -231,14 +231,14 @@ describe('push --mcp 的反向采集', () => {
     expect(out.items[0]?.def).toEqual({ transport: 'stdio', command: 'npx', args: ['-y', 'p'] });
   });
 
-  it('同名不同内容 → 拒绝并列出两处文件，要求 --agent 缩范围（不猜）', () => {
+  it('同名不同内容 → 拒绝并列出两处文件，要求 --tool 缩范围（不猜）', () => {
     writeClaudeJson({ two: { command: 'npx' } });
     mkdirSync(join(home, '.qoder-cn'), { recursive: true });
     writeFileSync(join(home, '.qoder-cn', 'settings.json'), JSON.stringify({ mcpServers: { two: { command: 'uvx' } } }), 'utf8');
     const out = collectMcpDefs(ctx(), ['claude', 'qoder-cn'], ['two']);
     expect(out.ok).toBe(false);
     expect(out.errors.join('\n')).toContain('内容不同');
-    expect(out.errors.join('\n')).toContain('--agent');
+    expect(out.errors.join('\n')).toContain('--tool');
     expect(out.errors.join('\n')).toContain(join(home, '.claude.json'));
   });
 

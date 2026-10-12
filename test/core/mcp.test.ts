@@ -123,7 +123,7 @@ describe('collectMcp: 合法文件', () => {
     const res = collectMcp(base, new Set(['fe']));
     expect(res.servers.map((s) => `${s.namespace}/${s.name}`)).toEqual(['fe/fe-mcp']);
     expect(res.fileError).toBeNull();
-    expect(res.warnings).toEqual(['mcp/ghost is not a declared namespace; skipped']);
+    expect(res.warnings).toEqual(['mcp/ghost 不是已声明的 namespace；跳过']);
   });
 });
 
@@ -460,7 +460,7 @@ describe('collectResources 接线', () => {
     expect(declared.kinds.mcp.map((r) => `${r.namespace}/${r.name}`)).toEqual(['fe/fe-mcp']);
     const undeclared = collectResources(base, manifestWith('qa'));
     expect(undeclared.kinds.mcp).toEqual([]);
-    expect(undeclared.warnings).toEqual(['mcp/fe is not a declared namespace; skipped']);
+    expect(undeclared.warnings).toEqual(['mcp/fe 不是已声明的 namespace；跳过']);
     expect(undeclared.mcpFileError).toBeNull();
   });
 });

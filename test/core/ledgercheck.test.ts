@@ -149,4 +149,26 @@ describe('auditLedger: merge 记账条目', () => {
     };
     expect(auditLedger(ledger).delivered).toHaveLength(1);
   });
+
+  it('扩展名猜错格式时双格式兜底：.toml 后缀的 JSON 文件仍判 delivered（格式在账本里没存，猜错不误报）', () => {
+    // 账本（types.ts 冻结）不存 merge format，核对按扩展名猜——猜错时解析不出我方键的哈希。
+    // 兜底：主格式失败用另一种格式再试，两种都失败才判 modified。
+    const weird = join(dir, 'config.toml'); // .toml 后缀，但内容是 JSON 形态
+    writeFileSync(weird, memberFile(), 'utf8');
+    const w: PlannedWrite = {
+      path: weird,
+      content: '',
+      resource: 'mcp:alpha',
+      merge: { format: 'json', pointer: ['mcpServers'], entries: { alpha: ALPHA } },
+    };
+    const ledger = applyPlan({
+      writes: [w],
+      activeResources: ['mcp:alpha'],
+      ledger: { version: 1, entries: [] },
+      isManaged: () => true,
+      now: NOW,
+    }).ledger;
+    expect(auditLedger(ledger).delivered).toHaveLength(1);
+    expect(auditLedger(ledger).modified).toEqual([]);
+  });
 });

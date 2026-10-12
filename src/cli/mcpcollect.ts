@@ -142,11 +142,11 @@ export function collectMcpDefs(
     const groups = [...byText.values()];
     if (groups.length === 0) continue;
     if (groups.length > 1) {
-      // 不许猜：同名不同内容时把每一处点名，让成员用 --agent 缩范围
+      // 不许猜：同名不同内容时把每一处点名，让成员用 --tool 缩范围
       errors.push(
         `server「${name}」在 ${groups.length} 个落点里内容不同：`,
         ...groups.map((g) => `  - ${g.origins.join('、')}`),
-        '下一步：加 --agent <工具 id> 指明从哪个工具采集（例如 --agent claude）',
+        '下一步：加 --tool <工具 id> 指明从哪个工具采集（例如 --tool claude）',
       );
       continue;
     }

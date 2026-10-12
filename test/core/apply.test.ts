@@ -458,13 +458,15 @@ describe('applyPlan: merge delivery (受管条目合并)', () => {
     expect(out2.result.written).toEqual([]); // 并集没有互相覆盖丢键 → 幂等
   });
 
-  it('文件解析失败：整体跳过该工具，不落盘、不记账、不留临时文件', () => {
+  it('文件解析失败：整体跳过该工具，不落盘、不记账、不留临时文件；点名到 kept（§3.3 规则 5 的 FAIL 级点名）', () => {
     const path = join(home, '.claude.json');
     seedFile(path, '{ broken LEAK-CANARY');
     const w = mergeJsonWrite(path, 'mcp:alpha', { alpha: ALPHA });
     const out = applyPlan(makeInput({ writes: [w], activeResources: ['mcp:alpha'] }));
     expect(out.result.written).toEqual([]);
-    expect(out.result.kept).toEqual([]);
+    // 解析失败绝不能静默：成员会以为团队下发了而自己没拿到。kept 点名该文件，
+    // pull 据此显示"配置无法解析"文案并返回退出码 1（kept 的现成语义）。
+    expect(out.result.kept).toEqual([{ path, resource: 'mcp:alpha', reason: 'foreign-file' }]);
     expect(out.ledger.entries).toEqual([]);
     expect(readFileSync(path, 'utf8')).toBe('{ broken LEAK-CANARY');
     const leftovers = readdirSync(home).filter((f) => f.includes('ejdrone-tmp') || f.includes('.tmp-'));

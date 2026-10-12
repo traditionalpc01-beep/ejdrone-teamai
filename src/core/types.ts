@@ -10,18 +10,27 @@
 // ---------------------------------------------------------------- 资源模型
 
 /**
- * 2.0 M6：新增 'mcp'。后续里程碑（M7 子 Agent、M8 团队知识、M9 经验沉淀）各自再加，
- * 加进这个联合类型后 `KindSet` 会强制所有分派点补齐 —— 漏一处就编译不过。
+ * 2.0 M6 加 'mcp'，M7 加 'agents'，M8 加 'docs'，M9 加 'learnings'。
+ * 加进这个联合类型后 `KindSet` 会强制所有分派点补齐 —— 漏一处就编译不过
+ * （`core/plan.ts` 的 KIND_ROOT、`cli/kinds.ts` 的 SPELLINGS 都是 Record<ResourceKind, …>）。
  */
-export type ResourceKind = 'skills' | 'rules' | 'mcp';
+export type ResourceKind = 'skills' | 'rules' | 'mcp' | 'agents' | 'docs' | 'learnings';
 
 /** 全部资源类型的集合；装配与测试用 `emptyKinds()` 起头。 */
 export type KindSet = Record<ResourceKind, Resource[]>;
 
 /** 一条团队资源。
  * namespace === '' 表示仓库根目录条目（全员共享）。
- * files: skills 为「仓库内相对路径 → 内容」（必含 SKILL.md）；rules 为 { content: 正文 }；
+ * files: skills 为「仓库内相对路径 → 内容」（必含 SKILL.md）；
+ * rules / agents / docs / learnings 为 { content: 正文 }（后三类是带 frontmatter 的单文件 md）；
  * mcp 为空对象，结构化内容在 payload（`mcp/mcp.yaml` 是列表文件，解析后一个 server 一条 Resource）。
+ *
+ * **name 的唯一性按 kind 分两档**（`resourceKey` = `${kind}:${name}` 是 ledger 的记账键，两条资源撞键
+ * 会让其中一条永远删不掉 —— 停用的那份被还在用的那份顶活着）：
+ * - skills / rules / agents / mcp：name = 条目名（不含 namespace），namespace 只用于裁决；
+ * - **docs / learnings：name = kind 根以下的相对路径去扩展名**（`ns1/arch`、根文件则是 `guide`），
+ *   namespace 同时保留在 `namespace` 字段上供过滤。这两类是并集语义，同名的根条目与 ns 条目
+ *   **都要投、都要各自记账**，所以键必须不同。
  */
 export interface Resource {
   kind: ResourceKind;
@@ -122,8 +131,18 @@ export interface Resolution {
   haltedKinds: ResourceKind[];
 }
 
-/** 空的 kind 集合；装配数据与测试都用它起头，新增 kind 时编译期会提醒补全所有分派点。 */
-export const RESOURCE_KINDS: ResourceKind[] = ['skills', 'rules', 'mcp'];
+export type KindSemantics = 'override' | 'union';
+
+/**
+ * 每类资源在团队仓库里的顶层目录名，以及它的 namespace 裁决语义。
+ *
+ * `KIND_SEMANTICS`：
+ * - `override`（skills / rules / agents）—— 活跃 ns 的同名条目**整体替换**根条目，两个活跃 ns 同名则该 kind 停发。
+ * - `union`（docs / learnings）—— 纯并集，**既不替换也不判冲突**：文档互相覆盖没有收益，只有惊讶；
+ *   把两条同名文档都投进镜像目录也只会让 recall 多出一条近似重复的命中。
+ * 用表而不是 `kind === 'docs' ? … : …`：新增 kind 时漏了这一格会编译失败。
+ */
+export const RESOURCE_KINDS: ResourceKind[] = ['skills', 'rules', 'mcp', 'agents', 'docs', 'learnings'];
 
 export function emptyKinds(): KindSet {
   const kinds = {} as KindSet;
@@ -262,6 +281,25 @@ export interface AgentAdapter {
    */
   planMcp?(
     servers: Resource[],
+    home: string,
+    env: NodeJS.ProcessEnv,
+    note?: (message: string) => void,
+  ): PlannedWrite[];
+
+  /**
+   * 子 Agent（M7）→ 该工具原生 agents 目录里的一个文件，按 `paths.ts` 的 `agentsFormat` 转形
+   * （md / agent-md / toml / json 四种，转换只在 `agents/agentfmt.ts` 一处）。
+   * 可选，与 planMcp 同一条原则：**能力有无只由落点表决定**，
+   * 表里 `agentsSubdir` 缺席的工具不实现这个方法，delivery 按「该工具没有 agents 落点」跳过，
+   * 不许在适配器或投递层按工具 id 写 if。
+   * 落点是 `<agents>/<name>.<ext>` 这样的一文件一 agent，整文件覆写（不是 mcp 那种条目级合并）；
+   * 与 block 模式的共同点是「文件里可能还有工具自家或其他人的内容」吗？不是 —— agents 目录里
+   * 一个名字一个文件，所以沿用 skills 的「本地改过就不覆盖、只点名」。
+   * `note` 与 planMcp 同用途：坏 frontmatter「保留原文投递」这类降级必须被看见，
+   * 静默降级会被成员当成"团队下发了但我没拿到"。只允许人类可读的名字，不得含仓库内容片段。
+   */
+  planAgents?(
+    agents: Resource[],
     home: string,
     env: NodeJS.ProcessEnv,
     note?: (message: string) => void,

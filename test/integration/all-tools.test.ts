@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { sep } from 'node:path';
 
 import { BLOCK_END, BLOCK_START } from '../../src/agents/block.js';
 import { TOOL_PATHS } from '../../src/agents/paths.js';
@@ -105,9 +106,10 @@ describe('16 工具全量投递', () => {
 
     const { ledger } = loadLedger(ledgerPath(member.env));
     expect(ledger.entries.length).toBeGreaterThan(0);
-    const roots = ALL_IDS.map((id) => `${member.path(TOOL_PATHS[id].rootRel)}/`);
+    // win32 下 entry.path 用反斜杠，硬拼 '/' 会让 startsWith 假阴性；按平台分隔符拼根前缀
+    const roots = ALL_IDS.map((id) => member.path(TOOL_PATHS[id].rootRel));
     for (const entry of ledger.entries) {
-      expect(roots.some((root) => entry.path.startsWith(root)), `越界投递：${entry.path}`).toBe(true);
+      expect(roots.some((root) => entry.path.startsWith(root + sep)), `越界投递：${entry.path}`).toBe(true);
     }
   });
 

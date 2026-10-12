@@ -127,7 +127,7 @@ function parseMcpFile(absPath: string, relPath: string, namespace: string): McpC
       for (const issue of parsed.error.issues) {
         const key = issue.path.join('.');
         warnings.push(
-          `${relPath}: ${entryLabel(entry, i)}${key ? ` ${key}` : ''}: ${issue.message}; entry skipped`,
+          `${relPath}: ${entryLabel(entry, i)}${key ? ` ${key}` : ''}：${issue.message}；该条跳过`,
         );
       }
       continue;
@@ -179,18 +179,18 @@ export function collectMcp(checkoutRoot: string, manifestNs: Set<string>): McpCo
   );
   for (const e of entries) {
     if (e.isSymbolicLink()) {
-      warnings.push(`mcp/${e.name} is a symlink; skipped`);
+      warnings.push(`mcp/${e.name} 是符号链接；跳过`);
       continue;
     }
     if (e.isFile()) {
       if (e.name !== 'mcp.yaml') {
-        warnings.push(`mcp/${e.name} ignored: only mcp/mcp.yaml and mcp/<ns>/mcp.yaml are read`);
+        warnings.push(`mcp/${e.name} 已忽略：只读取 mcp/mcp.yaml 与 mcp/<ns>/mcp.yaml`);
       }
       continue;
     }
     if (!e.isDirectory()) continue;
     if (!manifestNs.has(e.name)) {
-      warnings.push(`mcp/${e.name} is not a declared namespace; skipped`);
+      warnings.push(`mcp/${e.name} 不是已声明的 namespace；跳过`);
       continue;
     }
     const nsFile = join(mcpRoot, e.name, 'mcp.yaml');

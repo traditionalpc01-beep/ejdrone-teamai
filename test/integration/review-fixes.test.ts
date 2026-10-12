@@ -93,7 +93,13 @@ describe('hook 失效要能被看见', () => {
 
     const settingsPath = member.path('.claude', 'settings.json');
     const dead = `EJDRONE_HOOK=1 '${member.env.EJDRONE_NODE}' '/no/such/ejdrone-cli.js' pull --silent`;
-    writeFileSync(settingsPath, JSON.stringify({ hooks: { SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: dead }] }] } }), 'utf8');
+    // 夹具沿用 hooks.ts 的默认渲染（2 空格缩进 + 结尾换行）：生产代码重写 settings 会保持
+    // 原文件的缩进与结尾换行，测试夹具不能制造生产代码不会产生的形态。
+    writeFileSync(
+      settingsPath,
+      `${JSON.stringify({ hooks: { SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: dead }] }] } }, null, 2)}\n`,
+      'utf8',
+    );
 
     const report = await member.run(['doctor']);
     expect(report.code).toBe(1);
@@ -109,7 +115,12 @@ describe('hook 失效要能被看见', () => {
     const other = member.path('another-install.js');
     writeFileSync(other, '// 另一份安装\n', 'utf8');
     const cmd = `EJDRONE_HOOK=1 '${member.env.EJDRONE_NODE}' '${other}' pull --silent`;
-    writeFileSync(member.path('.claude', 'settings.json'), JSON.stringify({ hooks: { SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: cmd }] }] } }), 'utf8');
+    // 同上：夹具形态与 hooks.ts 默认渲染一致（2 空格 + 结尾换行）。
+    writeFileSync(
+      member.path('.claude', 'settings.json'),
+      `${JSON.stringify({ hooks: { SessionStart: [{ matcher: '*', hooks: [{ type: 'command', command: cmd }] }] } }, null, 2)}\n`,
+      'utf8',
+    );
 
     const report = await member.run(['doctor']);
     expect(report.all).toContain('不是同一份');

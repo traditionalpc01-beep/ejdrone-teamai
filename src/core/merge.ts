@@ -99,17 +99,29 @@ const has = (obj: object, key: string): boolean => Object.prototype.hasOwnProper
 interface JsonFormat {
   indent: number;
   trailingNewline: boolean;
+  /** 行尾跟原文件走：CRLF 文件每次 pull 被整体翻成 LF = 成员字节被动，卸载还原也不成立。 */
+  crlf: boolean;
 }
 
-/** 与 hooks.ts 同一思路：缩进与结尾换行跟着原文件走，卸载/重写后能回到成员原来的样子。 */
+/** 行尾探测：CRLF 行数不少于孤立 LF 行数才算 CRLF 文件（混合文件取多数，纯 LF 永远是 LF）。 */
+function usesCrlf(raw: string): boolean {
+  const crlf = (raw.match(/\r\n/g) ?? []).length;
+  const loneLf = (raw.match(/(?<!\r)\n/g) ?? []).length;
+  return crlf > 0 && crlf >= loneLf;
+}
+
+/** 与 hooks.ts 同一思路：缩进、结尾换行、行尾都跟着原文件走，卸载/重写后能回到成员原来的样子。 */
 function detectJsonFormat(raw: string): JsonFormat {
   const firstIndent = /^ {2,}/m.exec(raw)?.[0].length;
-  return { indent: firstIndent ?? 2, trailingNewline: raw.endsWith('\n') };
+  return { indent: firstIndent ?? 2, trailingNewline: raw.endsWith('\n'), crlf: usesCrlf(raw) };
 }
 
 function renderJson(doc: unknown, format: JsonFormat): string {
   const text = JSON.stringify(doc, null, format.indent);
-  return format.trailingNewline ? `${text}\n` : text;
+  const withEnd = format.trailingNewline ? `${text}\n` : text;
+  // JSON.stringify 的字符串值里不会有裸换行（都被转义成 \n 两个字符），这里的 \n 全是
+  // 结构性换行，整体替换不会误伤值内容；对已经 CRLF 的输入 replace 幂等。
+  return format.crlf ? withEnd.replace(/\n/g, '\r\n') : withEnd;
 }
 
 function mergeJson(input: MergeInput): MergeOutcome {
@@ -120,13 +132,13 @@ function mergeJson(input: MergeInput): MergeOutcome {
   let format: JsonFormat;
   if (input.current === null) {
     doc = {};
-    format = { indent: 2, trailingNewline: true };
+    format = { indent: 2, trailingNewline: true, crlf: false };
   } else {
     format = detectJsonFormat(input.current);
     if (input.current.trim() === '') {
       doc = {};
       // 空文件没有格式可继承：按我们新建文件的约定（2 空格 + 结尾换行）
-      format = { indent: 2, trailingNewline: true };
+      format = { indent: 2, trailingNewline: true, crlf: false };
     } else {
       let parsed: unknown;
       try {
@@ -409,7 +421,13 @@ function lastContentLine(lines: string[], from: number, to: number): number {
 function blockCanonical(lines: string[], block: TomlBlock): string {
   let e = block.contentEnd;
   while (e > block.start && (lines[e] ?? '').trim() === '') e -= 1;
-  return `${lines.slice(block.start, e + 1).join('\n')}\n`;
+  // 行尾的 \r 剥掉：CRLF 成员文件里"我们投的那份"的规范化文本必须与行尾无关，
+  // 否则 CRLF 文件每次 pull 都被判 modified-locally（永远无法幂等），账本核对（tomlEntryHashes
+  // 复用本函数）也会误报。行尾归一行尾的账（渲染出口的 CRLF 还原）由 mergeToml 的输出归一负责。
+  return `${lines
+    .slice(block.start, e + 1)
+    .map((l) => l.replace(/\r$/, ''))
+    .join('\n')}\n`;
 }
 
 /**
@@ -684,7 +702,11 @@ function mergeToml(input: MergeInput): MergeOutcome {
   }
   emitInserts(undefined);
 
-  const text = out.join('\n');
+  const joined = out.join('\n');
+  // 行尾跟原文件走：成员 CRLF 文件里我们插入/替换的块（LF 行）也要还原成 CRLF，
+  // 否则成员字节被改、二次 pull 不幂等。split('\n') 保留的成员行 \r 对 replace 幂等；
+  // 纯 LF 文件不动。usesCrlf 取多数行尾，混合文件以多数为准（与 detectJsonFormat 同口径）。
+  const text = usesCrlf(input.current) ? joined.replace(/\r?\n/g, '\r\n') : joined;
   const changed = text !== input.current;
   return okOutcome(text, changed, delivered, written, removed, kept);
 }

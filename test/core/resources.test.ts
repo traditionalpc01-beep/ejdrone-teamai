@@ -90,7 +90,7 @@ describe('collectResources: skills', () => {
     symlinkSync(join(base, 'skills', 'multi'), join(base, 'skills', 'linkdir'), 'dir');
     const res = collectResources(base, null);
     expect(skillNames(res.kinds.skills)).toEqual(['<root>/multi']);
-    expect(res.warnings.some((w) => w.includes('skills/linkdir') && /symlink/.test(w))).toBe(true);
+    expect(res.warnings.some((w) => w.includes('skills/linkdir') && /符号链接/.test(w))).toBe(true);
   });
 });
 

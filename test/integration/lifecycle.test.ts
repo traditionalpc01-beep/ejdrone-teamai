@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BLOCK_END, BLOCK_START } from '../../src/agents/block.js';
 import { ledgerPath } from '../../src/state.js';
 import { loadLedger } from '../../src/core/ledger.js';
-import { createHarness, installTools, seedTeamRepo, type Harness, type Member } from './helpers.js';
+import { createHarness, expectedHookCommand, installTools, seedTeamRepo, type Harness, type Member } from './helpers.js';
 
 /**
  * 端到端：真实 git origin + 伪造 HOME，跑通 init → push → 合入 → 成员 pull 的闭环，
@@ -40,24 +40,35 @@ describe('init：选定工具 + hook 落盘 + 幂等', () => {
     const result = await member.run(['init', h.origin, '--agent', 'claude,codex', '--role', 'be']);
     expect(result.code, result.all).toBe(0);
 
-    const settings = JSON.parse(member.read('.claude', 'settings.json')) as {
-      hooks: { SessionStart: Array<{ hooks: Array<{ command: string }> }> };
-    };
-    expect(settings.hooks.SessionStart).toHaveLength(1);
-    // 绝对路径的 node + cli 入口：GUI 启动的 agent 常常拿不到 npm 全局 bin 的 PATH
-    expect(settings.hooks.SessionStart[0]?.hooks[0]?.command).toBe(
-      `EJDRONE_HOOK=1 '${member.env.EJDRONE_NODE}' '${member.env.EJDRONE_CLI}' pull --silent`,
-    );
-    expect(member.exists('.codex', 'hooks.json')).toBe(true);
-    // 首次 init 末尾就完成投递
+    // 期望命令按当前平台推导：win32 且没有 Git for Windows 时 hook 一律不安装
+    // （init 只打印安装指引），settings/hooks.json 根本不会出现；macOS CI 走非 null 分支。
+    const expectedCmd = expectedHookCommand(member.env);
+    if (expectedCmd === null) {
+      expect(result.all).toContain('需要 Git for Windows');
+      expect(member.exists('.claude', 'settings.json')).toBe(false);
+      expect(member.exists('.codex', 'hooks.json')).toBe(false);
+    } else {
+      const settings = JSON.parse(member.read('.claude', 'settings.json')) as {
+        hooks: { SessionStart: Array<{ hooks: Array<{ command: string }> }> };
+      };
+      expect(settings.hooks.SessionStart).toHaveLength(1);
+      // 绝对路径的 node + cli 入口：GUI 启动的 agent 常常拿不到 npm 全局 bin 的 PATH
+      expect(settings.hooks.SessionStart[0]?.hooks[0]?.command).toBe(expectedCmd);
+      expect(member.exists('.codex', 'hooks.json')).toBe(true);
+    }
+    // 首次 init 末尾就完成投递（与有没有 Git Bash 无关）
     expect(member.exists('.claude', 'skills', 'root-note', 'SKILL.md')).toBe(true);
 
     const again = await member.run(['init', h.origin, '--force', '--agent', 'claude,codex', '--role', 'be']);
     expect(again.code, again.all).toBe(0);
-    const after = JSON.parse(member.read('.claude', 'settings.json')) as typeof settings;
-    expect(after.hooks.SessionStart).toHaveLength(1);
-    // 用户自己写在 settings 里的其他键不能被弄丢
-    expect(after.hooks.SessionStart[0]?.hooks).toHaveLength(1);
+    if (expectedCmd !== null) {
+      const after = JSON.parse(member.read('.claude', 'settings.json')) as {
+        hooks: { SessionStart: Array<{ hooks: Array<{ command: string }> }> };
+      };
+      expect(after.hooks.SessionStart).toHaveLength(1);
+      // 用户自己写在 settings 里的其他键不能被弄丢
+      expect(after.hooks.SessionStart[0]?.hooks).toHaveLength(1);
+    }
   });
 
   it('非交互且没有安装任何工具时不猜，直接给下一步', async () => {

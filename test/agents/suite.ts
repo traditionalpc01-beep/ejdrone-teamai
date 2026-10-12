@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { BLOCK_RESOURCE_KEY } from '../../src/agents/block.js';
-import { TOOL_PATHS } from '../../src/agents/paths.js';
+import { AGENTS_EXT, TOOL_PATHS } from '../../src/agents/paths.js';
 import { HOOK_COMMAND_MARKER } from '../../src/hooks.js';
 import type { AgentAdapter, PlannedWrite, Resource } from '../../src/core/types.js';
 
@@ -39,6 +39,23 @@ export function ruleFixture(): Resource {
     files: { content: '---\ndescription: Style guide\npaths:\n  - "src/**"\n---\n\n# Code Style\nBody.\n' },
   };
 }
+
+export const AGENT_NAME = 'reviewer';
+
+/** 带完整 frontmatter 的 agent 源：四种 format 的期望都从它推导。 */
+export function agentFixture(): Resource {
+  return {
+    kind: 'agents',
+    namespace: '',
+    name: AGENT_NAME,
+    files: {
+      content:
+        '---\nname: reviewer\ndescription: 评审助手\ntools: Read, Grep\nmodel: sonnet\n---\n\n# Reviewer\nBody.\n',
+    },
+  };
+}
+
+const AGENT_BODY = '\n# Reviewer\nBody.\n';
 
 function specOf(id: string) {
   const spec = TOOL_PATHS[id];
@@ -131,6 +148,52 @@ export function describeAdapter(adapter: AgentAdapter): void {
       expect(w.path).toBe(expectedPath);
     });
 
+    it('planAgents：有 agents 落点 → 一 agent 一文件（namespace 拍平、按 agentsFormat 转形）；无落点则不实现 planAgents', () => {
+      const format = spec.agentsFormat;
+      if (!spec.agentsSubdir || !format) {
+        // 能力有无只由表决定（同 mcpTarget 先例）：表里没给的工具**不实现**这个方法
+        expect(adapter.planAgents).toBeUndefined();
+        return;
+      }
+      expect(typeof adapter.planAgents).toBe('function');
+      const source = (agentFixture().files as Record<string, string>)['content'];
+      const writes = adapter.planAgents!([agentFixture()], home, HOME_ENV);
+      expect(writes).toHaveLength(1);
+      const w = writes[0] as PlannedWrite;
+      // 期望路径独立重算（不复用 agentsTarget helper）
+      expect(w.path).toBe(join(expectedRoot(home), spec.agentsSubdir, `${AGENT_NAME}${AGENTS_EXT[format]}`));
+      expect(w.resource).toBe(`agents:${AGENT_NAME}`);
+      expect(w.region).toBeUndefined();
+      expect(w.merge).toBeUndefined();
+      switch (format) {
+        case 'md':
+        case 'agent-md':
+          // 完整 frontmatter → 逐字节原样（正文自然一字不变）
+          expect(w.content).toBe(source);
+          break;
+        case 'toml':
+          expect(w.content).toContain(`name = "${AGENT_NAME}"`);
+          expect(w.content).toContain('developer_instructions =');
+          expect(w.content).toContain('model = "sonnet"');
+          // §7.1 冻结：codex 形态故意不写 tools
+          expect(w.content).not.toContain('tools');
+          break;
+        case 'json': {
+          const parsed = JSON.parse(w.content) as Record<string, unknown>;
+          expect(parsed.name).toBe(AGENT_NAME);
+          expect(parsed.description).toBe('评审助手');
+          expect(parsed.prompt).toBe(AGENT_BODY);
+          // §7.1 冻结：不注入 hooks.agentSpawn
+          expect(parsed.hooks).toBeUndefined();
+          break;
+        }
+      }
+      // namespace 拍平：ns 条目与根条目落在同一个文件名（agents 是 override 语义，name 不含 ns 段）
+      const nsWrites = adapter.planAgents!([{ ...agentFixture(), namespace: 'be' }], home, HOME_ENV);
+      expect(nsWrites[0]?.path).toBe(w.path);
+      expect(nsWrites[0]?.resource).toBe(w.resource);
+    });
+
     it('ownsPath：管 skills 子树与 rules 子树，绝不管工具根本身或 block 文件', () => {
       expect(adapter.ownsPath(join(expectedRoot(home), spec.skillsSubdir, 'a', 'SKILL.md'), home, HOME_ENV)).toBe(true);
       if (spec.rulesSubdir) {
@@ -138,6 +201,12 @@ export function describeAdapter(adapter: AgentAdapter): void {
       }
       if (spec.rulesBlockFile) {
         expect(adapter.ownsPath(join(expectedRoot(home), spec.rulesBlockFile), home, HOME_ENV)).toBe(false);
+      }
+      // M7：agents 子树同样要纳管，否则卸载留孤儿；没有 agents 落点的工具不认领它
+      if (spec.agentsSubdir) {
+        expect(adapter.ownsPath(join(expectedRoot(home), spec.agentsSubdir, 'x.md'), home, HOME_ENV)).toBe(true);
+      } else {
+        expect(adapter.ownsPath(join(expectedRoot(home), 'agents', 'x.md'), home, HOME_ENV)).toBe(false);
       }
       // 根本身与别人的目录都不管
       expect(adapter.ownsPath(expectedRoot(home), home, HOME_ENV)).toBe(false);
