@@ -315,7 +315,7 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 - [x] **T7.6 doctor**：agents 落点逐项可查（有落点但目录不存在 = WARN；停发 = FAIL 点名）。
 - [x] **T7.7 门槛**：typecheck + 全量测试绿；端到端：根 agent + ns agent → 成员 pull → claude（md）与 codex（toml）
   落点内容正确 → 切角色后 ns agent 移除、根 agent 保留 → 二次 pull 幂等。
-- [ ] **T7.8 真机（部分完成，2026-10-13）**：agent 投递到真实 Windows 成员目录后的**内容级**核对已过（claude 收到 `kafka-ops.md`、codex 收到 `kafka-ops.toml` 且确实没有 tools 键、ns agent 只给订阅者）；仍欠「打开真实 Claude Code 会话确认 `/agents` 把它列出来」—— 试了 headless `claude -p` 与 `--include-hook-events`，本机 150s 内零输出（退出码 124），登记为环境阻塞。证据见 `docs/trials/2026-10-13-windows-real-trial.md` §4 与 §7.3。
+- [ ] **T7.8 真机（部分完成，2026-10-13）**：agent 投递到真实 Windows 成员目录后的**内容级**核对已过（claude 收到 `kafka-ops.md`、codex 收到 `kafka-ops.toml` 且确实没有 tools 键、ns agent 只给订阅者）；仍欠「打开真实 Claude Code 会话确认 `/agents` 把它列出来」—— 已于 2026-10-13 往成员真在用的 ~/.claude 做过 init→doctor→uninstall 与逐字节还原对账（自有 env 键与 216 份自有 agent 全部原样、零缺失）；只剩「会话里目视确认 /agents」一项，因本机 Claude Code 的模型出口指向未运行的本地代理 127.0.0.1:15721、headless 会话零输出直到超时而定为人工两分钟步骤（试验记录 §7.6 给了命令）。证据见 `docs/trials/2026-10-13-windows-real-trial.md` §4 与 §7.3。
   试验记录 + 逐字节还原。
 
 **回滚**：删 `agents/` 目录（MR），pull 后移除。

@@ -234,9 +234,46 @@ Windows 上所有 MCP merge 写与 0600 收紧写全废）当时写的是「代�
 测试注入 `prompt/confirm/choose` 后不会走到）与 `roles.ts` 60%、`agentscollect.ts` 62%
 （交互式多选），属设计内不可测面，不是漏测；`src/core` 与 `src/agents` 基本 100%。
 
+## 7.6 真实成员环境（往真用的 `~/.claude` 做过一次，含还原对账）
+
+用户批准后，把试验深度推进到**真实成员配置**：先对 `~/.claude/settings.json`、`settings.local.json`、
+`~/.claude.json`、`~/.claude/agents/**` 做整备份并逐文件 sha256 建基线，然后对真实 HOME 跑真 init。
+
+真实环境里验证到的（这些是隔离 HOME 给不出的证据）：
+
+| 项 | 结果 |
+|---|---|
+| hook 装进**成员真在用的** `~/.claude/settings.json` | 成功，且 `hooks.SessionStart` 只多我们那一条 |
+| 同一文件里成员自有的其它键 | **`env` 块完整保留**（含 `ANTHROPIC_AUTH_TOKEN`、指向 `127.0.0.1:15721` 的 `ANTHROPIC_BASE_URL` 与一串模型别名）—— §3.3「共享配置文件只动我们那一个键」在真实配置上成立，不是夹具里的构造 |
+| 投递进已有 216 份 agent 的真实 `agents/` 目录 | 只增不改：`ejdrone-real-agent.md` 落进去，其余 216 份一字节没动 |
+| `~/.claude.json`（MCP 与项目状态） | 团队仓库故意不放 `mcp/`，全程未被触碰（58 个顶层键、`mcpServers` 集合与取值逐项与备份相同） |
+| 真实环境 `doctor --json` | `{"pass":16,"warn":0,"fail":0}` 退出码 0 |
+| `uninstall --force` 后还原对账 | `settings.json` 与 init 前**逐字节一致**；216 份 agent 全部一致、零缺失零新增；4 个投递文件与其记账清除；`~/.ejdrone` 已移除（试验前不存在）；`rules` 空目录已清理 |
+
+**仍未拿到的**：在真实会话里目视确认 `/agents` 列出投出去的 agent、`SessionStart` 被工具触发。
+原因是环境而不是代码 —— 这台机器的 Claude Code 配置把 `ANTHROPIC_BASE_URL` 指向本地代理
+`127.0.0.1:15721`，代理未运行时 `claude` 进程**零输出直到超时**（`--output-format stream-json
+--include-hook-events` 与普通 `-p` 都是 `status=null`、0 字节），所以任何 headless 探针都拿不到数据。
+我没有去动那个代理（那是成员自己的模型出口配置，不在本试验范围内）。
+
+GA 前由本人在一个能正常工作的 Claude Code 会话里做掉即可，两分钟：
+
+```bash
+# 装好后 ejdrone init <团队仓> --agent claude，然后正常开一次 claude 会话
+/agents                       # 应能看到团队投下来的那个 agent 名字
+# 会话开起来之后，另开终端：
+ejdrone doctor                # hook:claude 应 PASS
+ls ~/.claude/skills           # 团队 skill 应已在里面
+```
+
+顺带记录一条还原对账上的自我纠正：脚本一开始把基线 agent 数写成 228，那是把两个 settings 文件
+一起数进 manifest 的笔误；真实基线是 216。逐项比对后确认**没有删除任何成员文件**
+（216 份全部存在且逐字节一致）。这类「自己算错的基线」在还原对账里会被当成"我们删了 12 个文件"，
+所以基线数字必须由比对脚本现算，不能手写。
+
 ## 8. 仍然遗留
 
-1. 真实工具会话内的目视确认（§7.3）。
+1. 真实工具会话内的目视确认（§7.3 环境根因 + §7.6 的两分钟人工步骤）。
 2. HKCU-only 的 Git 注册表形态（§7.1，要动系统注册表才能造）。
 3. P3 观察池不变（ledgerEntry Map 索引、probe 显式化、debug.log 轮换、doctor.ts 拆分）。
 

@@ -8,16 +8,18 @@
 ## 装
 
 ```bash
-npm install -g ejdrone-skills@2.0.0-preview.0   # 内网 npm 源
+npm install -g ejdrone-skills@2.0.0-preview.1   # 内网 npm 源
 ejdrone --version
 ```
 
-2.0 目前以 **preview** 形态发：六类资源（skills / rules / mcp / agents / docs / learnings）的代码与测试都已就位。
+2.0 目前以 **preview** 形态发（`2.0.0-preview.1`）：六类资源（skills / rules / mcp / agents / docs / learnings）的代码与测试都已就位。
 验证状态分三档，按档取用：skills / rules / MCP 在 macOS 真机上走过投递与卸载还原；
-Windows 在 2026-10-13 上过真机（全量测试 + `init→pull→hook→doctor→uninstall` 全流程，
-见 `docs/trials/2026-10-13-windows-real-trial.md`），但**没有**往成员真实在用的工具配置目录写入，
-所以「打开真实工具会话确认 `/agents` 列出投出去的 agent」这一档仍未验；
+Windows 在 2026-10-13 上过真机，并且**往成员真在用的 `~/.claude` 做过一次完整 init→doctor→uninstall 与逐字节还原对账**
+（同文件的 `env` 自有键与 216 份自有 agent 全部原样），见 `docs/trials/2026-10-13-windows-real-trial.md`；
 子 Agent、团队知识、经验沉淀的验证是夹具逐字节对拍 + 真机行为级（hook 六种启动方式真跑、`recall` 中英文判读、`contribute` 全链路）。
+唯一还没做的一项是「在真实工具会话里目视确认 `/agents` 列出团队投下来的 agent」——
+本机 Claude Code 的模型出口指向一个未运行的本地代理，headless 会话零输出直到超时，
+所以这一项要由人在一个能正常工作的会话里花两分钟确认（步骤见试验记录 §7.6）。
 预发布号不会被裸 `npm install -g ejdrone-skills` 选中，所以装它要显式带版本号。
 
 前置：Node.js ≥ 20、git。Windows 另需 Git for Windows（hook 走它的 bash.exe 绝对路径）。
