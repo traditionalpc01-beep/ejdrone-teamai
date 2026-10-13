@@ -626,3 +626,62 @@ describe('applyPlan: 含已解析值的 merge 投递必须收紧权限', () => {
     expectMode(path, 0o644);
   });
 });
+
+/**
+ * 版本评审 W-2/D1+D2 的 Windows 直接哨兵。
+ *
+ * 那条 P0 的失效方式是：临时文件名用 '/' 手切时，Windows 上整个绝对路径（含盘符冒号）
+ * 变成一个非法文件名，`writeFileSync` 直接 EINVAL —— 于是所有 MCP merge 写与 0600 收紧写在
+ * Windows 上全废。评审当时写的是「该分支无任何测试覆盖，只能等 Windows 真机」，
+ * 因为 POSIX 进程里 `basename` 在 import 期绑定、构造不出 Windows 路径形态。
+ * 这里就是那台真机：整段只在 win32 跑，钉的是「已存在的共享配置文件真的被写成功、
+ * 且没留下任何半途临时文件」—— 两件事合起来才排掉 EINVAL 与 rename 覆盖不可靠。
+ */
+describe.runIf(process.platform === 'win32')('applyPlan on a real Windows host (P0 W-2/D1+D2)', () => {
+  it('写入一个已存在的共享配置文件：成功、内容正确、目录里没有临时文件残留', () => {
+    const path = join(home, 'existing-windows.json');
+    seedFile(path, JSON.stringify({ mcpServers: { mine: { command: 'keepme' } } }, null, 2) + '\n');
+    const w: PlannedWrite = {
+      path,
+      content: '',
+      resource: 'mcp:claude-merge',
+      merge: {
+        format: 'json',
+        pointer: ['mcpServers'],
+        entries: { team: JSON.stringify({ command: 'npx', args: ['-y', 'x'] }) },
+      },
+    };
+    expect(() => applyPlan(makeInput({ writes: [w], activeResources: ['mcp:claude-merge'] }))).not.toThrow();
+
+    const doc = JSON.parse(readFileSync(path, 'utf8')) as { mcpServers: Record<string, unknown> };
+    expect(doc.mcpServers.mine).toEqual({ command: 'keepme' });
+    expect(doc.mcpServers.team).toBeDefined();
+
+    const leftovers = readdirSync(home).filter((n) => n.includes('ejdrone-tmp'));
+    expect(leftovers, `Windows 上不该留下半途临时文件：${leftovers.join(', ')}`).toEqual([]);
+  });
+
+  it('同一个已存在文件被反复覆写（rename 覆盖不可靠那一环）', () => {
+    const path = join(home, 'repeat-windows.json');
+    seedFile(path, JSON.stringify({ mcpServers: { mine: { command: 'keepme' } } }, null, 2) + '\n');
+    const writeFor = (i: number): PlannedWrite => ({
+      path,
+      content: '',
+      resource: 'mcp:claude-merge',
+      merge: { format: 'json', pointer: ['mcpServers'], entries: { team: JSON.stringify({ command: `run-${i}` }) } },
+    });
+
+    // 必须把上一轮的 ledger 带进下一轮：否则第二次看到的是「文件里有、账本里没有」的条目，
+    // 走 foreign-entry 跳过而不是覆写 —— 那样根本没碰到 rename 覆盖已存在文件这一环。
+    let ledger = applyPlan(makeInput({ writes: [writeFor(0)], activeResources: ['mcp:claude-merge'] })).ledger;
+    for (let i = 1; i < 4; i += 1) {
+      const out = applyPlan(makeInput({ writes: [writeFor(i)], activeResources: ['mcp:claude-merge'], ledger }));
+      expect(out.result.written.length, `第 ${i} 次应当真的覆写`).toBe(1);
+      ledger = out.ledger;
+    }
+    const doc = JSON.parse(readFileSync(path, 'utf8')) as { mcpServers: { mine?: unknown; team?: { command?: string } } };
+    expect(doc.mcpServers.team?.command).toBe('run-3');
+    expect(doc.mcpServers.mine).toEqual({ command: 'keepme' });
+    expect(readdirSync(home).filter((n) => n.includes('ejdrone-tmp'))).toEqual([]);
+  });
+});

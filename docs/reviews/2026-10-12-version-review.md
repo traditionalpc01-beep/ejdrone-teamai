@@ -76,7 +76,7 @@
 
 | 项 | 风险 | 处置 |
 |---|---|---|
-| W-2/D1+D2 apply.ts 写路径 win32 崩溃 | **P0**（Windows MCP 功能完全不可用：临时文件名含冒号 EINVAL 先于 rename 覆盖失败） | 代码已修（R-A1/A2 改走 `replaceFileSync` 与按平台切分的 `basename`），**但该分支无任何测试覆盖**：POSIX 进程里 `node:path` 的 `basename` 在 import 期绑定，构造不出 Windows 路径形态，`test/core/apply.test.ts` 里 win32 零命中。验证只能等 Windows 真机（见 `docs/trials/2026-10-11-m10-trial.md` §4） |
+| W-2/D1+D2 apply.ts 写路径 win32 崩溃 | **P0**（Windows MCP 功能完全不可用：临时文件名含冒号 EINVAL 先于 rename 覆盖失败） | 代码已修（R-A1/A2 改走 `replaceFileSync` 与按平台切分的 `basename`）。**2026-10-13 Windows 真机已结算**：`test/core/apply.test.ts` 末尾新增 `runIf(win32)` 两条直接哨兵（写已存在的共享配置文件成功且无临时文件残留；带 ledger 串起来的反复覆写真的走到 rename 覆盖那一环），在 Windows 10 真机上通过；全量 891 例绿。原文「该分支无任何测试覆盖」的成因（POSIX 进程里 `basename` 在 import 期绑定、构造不出 Windows 路径形态）依然成立，所以这两条只在 win32 主机上执行，POSIX CI 上为空跑 |
 | W-1/D3+Q2 findGitBash 漏 per-user 路径 | **P1**（非管理员安装的 Git for Windows 被误报未装） | **已修复**（LOCALAPPDATA + HKCU，R-B1 + 2 测试） |
 | D3 doctor cli 归属误报 | P2 | **已修复**（samePath，R-D1 + darwin/win32 差分测试） |
 | D4 merge.ts CRLF 破坏逐字节还原 | P2 | **已修复**（JSON/TOML 行尾探测与还原，R-L1 + 3 测试） |
@@ -86,7 +86,7 @@
 ### 测试覆盖（严过关）
 
 - 725 个用例（修复前 704）：rules 四模式、merge 六规则、${VAR} 哨兵、停发语义、ledger 1.0 兼容、卸载逐字节还原覆盖充分（★★★）。
-- 本轮补齐的高价值缺口：merge CRLF 用例 ×3、lock stale/release 用例 ×4、doctor samePath 差分/账本 hint/roles 检查用例 ×6、ensureClone relink 用例 ×2、findGitBash per-user 用例 ×2、MCP 第二工具 e2e、坏配置点名 e2e。**未补齐**：apply win32 写路径注入用例（该分支在 POSIX 进程里结构性不可测，只能真机验，见上表 W-2/D1+D2）。
+- 本轮补齐的高价值缺口：merge CRLF 用例 ×3、lock stale/release 用例 ×4、doctor samePath 差分/账本 hint/roles 检查用例 ×6、ensureClone relink 用例 ×2、findGitBash per-user 用例 ×2、MCP 第二工具 e2e、坏配置点名 e2e。~~未补齐：apply win32 写路径注入用例~~ —— **2026-10-13 已在 Windows 真机补齐**（`test/core/apply.test.ts` 的 `runIf(win32)` 两条），该分支在 POSIX 进程里结构性不可测的结论不变，所以补齐只能在真机侧发生。
 - 登记观察：13 工具深度行为靠表驱动六项 + PROBE 兜底（设计取舍）；dirclean 无直测（P3）。
 
 ---

@@ -215,6 +215,20 @@ uninstall --force → 退出码 0，wrapper 已删，投递文件与记账清干
 路径含空格时的 `cmd.exe /c` 降级 + doctor `win:hookbash` WARN、wrapper 写失败时不装 hook
 并给出「手动 pull 不受影响」、uninstall 删除 wrapper。
 
+### 7.5 已结算：版本评审里那条「P0 但无测试覆盖，只能真机验」
+
+`docs/reviews/2026-10-12-version-review.md` 的 W-2/D1+D2（临时文件名含盘符冒号 → EINVAL，
+Windows 上所有 MCP merge 写与 0600 收紧写全废）当时写的是「代码已修但该分支无任何测试覆盖，
+验证只能等 Windows 真机」。真机到了，补两条 `runIf(win32)` 直接哨兵并已通过：
+
+- 写一个**已存在**的共享配置文件：不抛、成员条目原样、目录里没有任何 `ejdrone-tmp` 残留；
+- 带 ledger 串起来的**反复覆写**：每一轮都断言「真的写了 1 次」——
+  不带 ledger 会退化成 foreign-entry 跳过，那样根本碰不到 rename 覆盖已存在文件这一环，
+  这条是这次补测里唯一真正对着 P0 失效点的断言。
+
+「POSIX 进程里 `basename` 在 import 期绑定、构造不出 Windows 路径形态」这个成因仍然成立，
+所以这两条在 macOS/Linux CI 上是空跑：这条分支的覆盖只能来自 Windows 主机，不是回归套件的常态保障。
+
 全仓覆盖率（临时 `--no-save` 装 `@vitest/coverage-v8`，不改依赖）：
 **语句 88.99%、分支 82.7%、函数 98.48%**。低的是 `context.ts` 46.91%（交互 prompt 默认实现，
 测试注入 `prompt/confirm/choose` 后不会走到）与 `roles.ts` 60%、`agentscollect.ts` 62%
