@@ -227,21 +227,21 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 
 **任务**（每组一个子代理，可并行；每个适配器一个文件 + 对应测试文件）：
 
-- [ ] **T5.1 冻结落点矩阵**：16 工具 × 5 能力格，逐格填路径/格式 + `已核实|PROBE` 标记。
+- [x] **T5.1 冻结落点矩阵**：16 工具 × 5 能力格，逐格填路径/格式 + `已核实|PROBE` 标记。
   依据 teamai `sharing.md` §MCP 落点表与 `advanced.md` §Hooks，结合各工具官方文档；填不出的一律 PROBE，禁止猜。
   交付：`paths.ts` 表 + 注释。
-- [ ] **T5.2 适配器组 A**（`codebuddy`、`workbuddy`、`copilot`、`kiro`）：
+- [x] **T5.2 适配器组 A**（`codebuddy`、`workbuddy`、`copilot`、`kiro`）：
   Create `src/agents/codebuddy.ts`、`workbuddy.ts`、`copilot.ts`、`kiro.ts`；Test `test/agents/adapters.test.ts` 扩展。
   已知锚点：copilot 根目录读 `COPILOT_HOME`（绝对路径才生效，同 `DSH_HOME` 规则）；kiro 的 SessionStart 不以文件 hook 存在
   （teamai 以 agent 同步内嵌）→ `installHook` 允许返回 `{ installed: false, reason }`，doctor 据 reason 显示。
-- [ ] **T5.3 适配器组 B**（`opencode`、`pi`、`openclaw`、`hermes`）：
+- [x] **T5.3 适配器组 B**（`opencode`、`pi`、`openclaw`、`hermes`）：
   同上。锚点：opencode 根在 `~/.config/opencode/`；openclaw 只有 SessionStart+UserPromptSubmit 且 hook 是 workspace 级
   （user scope 下按「无可用 hook」处理，installed:false）；hermes 只有 SessionStart。
-- [ ] **T5.4 适配器组 C**（`qoder`、`trae`、`trae-cn`）：
+- [x] **T5.4 适配器组 C**（`qoder`、`trae`、`trae-cn`）：
   同上。锚点：trae/trae-cn 无用户级 MCP 落点（仅项目级）→ mcpTarget 缺席；hook 落点全部 PROBE。
-- [ ] **T5.5 注册与 doctor**：`src/agents/index.ts` 注册 16 个；`doctor` 逐工具检查 detect/hook/落点，PROBE 项 WARN。
-- [ ] **T5.6 门槛**：`npm run typecheck` + `npm test` 全绿；新增适配器每个至少 3 个单测（detect / planSkills+planRules / ownsPath）。
-- [ ] **T5.7 真机**：本机已装的工具（claude、qoder-cn、codex）回归投递幂等；未安装工具用临时目录伪造根目录验证 detect
+- [x] **T5.5 注册与 doctor**：`src/agents/index.ts` 注册 16 个；`doctor` 逐工具检查 detect/hook/落点，PROBE 项 WARN。
+- [x] **T5.6 门槛**：`npm run typecheck` + `npm test` 全绿；新增适配器每个至少 3 个单测（detect / planSkills+planRules / ownsPath）。
+- [x] **T5.7 真机**：本机已装的工具（claude、qoder-cn、codex）回归投递幂等；未安装工具用临时目录伪造根目录验证 detect
   不误报。试验记录 + 逐字节还原。
 
 **回滚**：适配器是纯增量，摘除 `index.ts` 注册即回到 1.0 行为。
@@ -254,25 +254,25 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 
 **任务**：
 
-- [ ] **T6.1 解析器**：Create `src/core/mcp.ts` — 解析 `mcp/mcp.yaml` 与 `mcp/<ns>/mcp.yaml`（zod strict；
+- [x] **T6.1 解析器**：Create `src/core/mcp.ts` — 解析 `mcp/mcp.yaml` 与 `mcp/<ns>/mcp.yaml`（zod strict；
   未知 key 报错入 warnings；`servers:` 顶层 key 缺失 = 文件级失败 → mcp 停发）。Test `test/core/mcp.test.ts`：
   合法/坏 YAML/未知 key/缺 servers key/ns 覆盖/双 ns 同名冲突。
-- [ ] **T6.2 `${VAR}` 解析**：同一文件内。只从 `env` 参数（进程环境）取值；取不到 → 该 server 跳过并点名
+- [x] **T6.2 `${VAR}` 解析**：同一文件内。只从 `env` 参数（进程环境）取值；取不到 → 该 server 跳过并点名
   （interactive 打印 + `mcp list` 标 missing；silent 写 debug.log）。已解析值不进任何输出。Test 覆盖。
-- [ ] **T6.3 裁决接入**：`core/plan.ts` + `core/resources.ts` 按 §3.2 接 mcp；`resolve()` 输出 mcp 候选集。
-- [ ] **T6.4 合并投递**：`core/apply.ts` 实现 §3.3 六条规则；`core/ledger.ts` 读写 `managedKeys`。
+- [x] **T6.3 裁决接入**：`core/plan.ts` + `core/resources.ts` 按 §3.2 接 mcp；`resolve()` 输出 mcp 候选集。
+- [x] **T6.4 合并投递**：`core/apply.ts` 实现 §3.3 六条规则；`core/ledger.ts` 读写 `managedKeys`。
   Test `test/core/apply.test.ts`：六条规则各至少一例，外加「合并中途任何一步失败不留半写文件」。
-- [ ] **T6.5 适配器 `planMcp`**（可与 T6.4 并行，依赖契约）：`AgentAdapter` 新增 `planMcp(servers, home, env): PlannedWrite[]`。
+- [x] **T6.5 适配器 `planMcp`**（可与 T6.4 并行，依赖契约）：`AgentAdapter` 新增 `planMcp(servers, home, env): PlannedWrite[]`。
   四种格式 writer 收口在 `src/agents/mcpfmt.ts`（json-mcpServers / toml-codex / json-opencode / json-copilot），
   适配器只查表调用；`mcpTarget` 缺席的工具返回空数组。`tools:` 字段过滤在 planMcp 入口统一做。
   codex 跳过 `sse`（其不支持）并 warning。`requires` 探测在此做（Windows PATHEXT 由 T10.1 的 platform 层兜底，
   M6 先做 POSIX `PATH` 查找并留接口）。
-- [ ] **T6.6 命令**：`push --mcp <name>`（从本机某工具配置里反向采集一个 server 入仓库，走 MR）、
+- [x] **T6.6 命令**：`push --mcp <name>`（从本机某工具配置里反向采集一个 server 入仓库，走 MR）、
   `remove mcp <name...>`、`list mcp`、`status` 计入 mcp；doctor 加「mcp 文件可解析 / 受管条目与账本一致」检查。
-- [ ] **T6.7 门槛**：typecheck + 全量测试绿；端到端用例（`test/integration/`）：仓库声明 stdio+http 两个 server →
+- [x] **T6.7 门槛**：typecheck + 全量测试绿；端到端用例（`test/integration/`）：仓库声明 stdio+http 两个 server →
   成员 pull → 断言 claude/codex/cursor 三工具配置文件条目正确、用户自有条目原样、二次 pull 幂等、
   停用 ns 后条目移除且用户条目不动。
-- [ ] **T6.8 真机**：本机 claude + qoder-cn 实际注入一个 `npx -y` 型 stdio server 与一个不存在的 url 型 http server，
+- [x] **T6.8 真机**：本机 claude + qoder-cn 实际注入一个 `npx -y` 型 stdio server 与一个不存在的 url 型 http server，
   开工具确认前者出现、后者跳过点名；`doctor` 无 FAIL。试验记录 + 逐字节还原。
 
 **回滚**：`mcp/` 目录从团队仓库删除（MR），pull 后各工具受管条目移除（规则 3），用户条目不动。
@@ -313,9 +313,9 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
   照 teamai 语义）、`list agents`。`remove` 走 MR 删仓库文件即可——1.0 的「合入后 pull 移除」语义不变，
   不需要 teamai 的 tombstone（我们没有「仓库没变也要清理」的场景，登记 §7）。
 - [x] **T7.6 doctor**：agents 落点逐项可查（有落点但目录不存在 = WARN；停发 = FAIL 点名）。
-- [ ] **T7.7 门槛**：typecheck + 全量测试绿；端到端：根 agent + ns agent → 成员 pull → claude（md）与 codex（toml）
+- [x] **T7.7 门槛**：typecheck + 全量测试绿；端到端：根 agent + ns agent → 成员 pull → claude（md）与 codex（toml）
   落点内容正确 → 切角色后 ns agent 移除、根 agent 保留 → 二次 pull 幂等。
-- [ ] **T7.8 真机**：claude 真机投递一个 agent，开 `/agents` 确认可见可用；codex 侧看 `<name>.toml` 是否被列出。
+- [ ] **T7.8 真机（部分完成，2026-10-13）**：agent 投递到真实 Windows 成员目录后的**内容级**核对已过（claude 收到 `kafka-ops.md`、codex 收到 `kafka-ops.toml` 且确实没有 tools 键、ns agent 只给订阅者）；仍欠「打开真实 Claude Code 会话确认 `/agents` 把它列出来」—— 按裁定本轮不往成员真实配置目录写入。证据见 `docs/trials/2026-10-13-windows-real-trial.md` §1/§7。
   试验记录 + 逐字节还原。
 
 **回滚**：删 `agents/` 目录（MR），pull 后移除。
@@ -352,7 +352,7 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 - [x] **T8.6 门槛**：typecheck + 全量测试绿；端到端：seed docs 根 + ns → 成员 pull → 镜像存在且 ns 过滤正确 →
   recall 命中根文档、不命中未激活 ns 文档 → `--check` 两种退出码正确 → 成员改过镜像副本后 pull 只点名不覆盖 →
   ns 失效后镜像副本删除。
-- [ ] **T8.7 真机**：本机跑三次真实 recall（中英文混合 query），人工判读前 5 条可用。试验记录 + 还原。
+- [x] **T8.7 真机**：本机跑三次真实 recall（中英文混合 query），人工判读前 5 条可用。试验记录 + 还原。
 
 **回滚**：删 `docs/`（MR）+ 移除镜像目录记账。
 
@@ -385,7 +385,7 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
   （`hookEvents` 表已留位）；三选二探得通才做：会话结束按「打断次数 / 工具拒绝 / 同一工具连续失败」计分
   （照 teamai 的量纲：单项 ×20、阈值 20、每会话最多一次），达标打印一行提示。
   探不通或排期超限 → 砍掉，在试验记录里写明探测结论。**砍它不阻塞 M9 验收。**
-- [ ] **T9.5 真机**：完整走一遍「写 learning → contribute → 模拟评审合入 → 临时 HOME 成员 pull → recall 命中」。
+- [x] **T9.5 真机**：完整走一遍「写 learning → contribute → 模拟评审合入 → 临时 HOME 成员 pull → recall 命中」。
   试验记录 + 逐字节还原。
 
 **回滚**：删 `learnings/`（MR）+ 移除镜像记账。
@@ -409,24 +409,24 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 
 **任务**：
 
-- [ ] **T10.1 platform 层**：Create `src/platform.ts` —
+- [x] **T10.1 platform 层**：Create `src/platform.ts` —
   `isWindows`；`findGitBash(env)`（候选：`%ProgramFiles%\Git\bin\bash.exe`、`%ProgramFiles(x86)%\Git\bin\bash.exe`、
   `reg query HKLM\SOFTWARE\GitForWindows /v InstallPath`，全失败返回 null）；`whichWithPathext(name, env)`
   （Windows 匹配 `PATHEXT` 后缀，`uvx` 命中 `uvx.exe`/`uvx.cmd`）；`samePath(a, b)`（Windows 大小写不敏感、
   `\`/`/` 归一）。Test `test/platform.test.ts`：纯函数注入平台参数，不依赖真 Windows。
-- [ ] **T10.2 hook 命令 Windows 形态**：`cli/constants.ts` 的 `hookCommand()`——win32 时用
+- [x] **T10.2 hook 命令 Windows 形态**：`cli/constants.ts` 的 `hookCommand()`——win32 时用
   `'<gitbash>' -lc 'EJDRONE_HOOK=1 <node> <cli> pull --silent'`，gitbash 找不到 → `installHook` 返回
   installed:false + reason「需要 Git for Windows」。**裸 `bash` 永远不用**（解析到 WSL 启动器，Node 18 跑不动产物，
   hook 静默崩——teamai windows.md 用一整篇讲这个坑）。
-- [ ] **T10.3 跨平台自查**：`state.ts`（0600 chmod 已 best-effort ✓）、`lock.ts`（mtime stale ✓）、
+- [x] **T10.3 跨平台自查**：`state.ts`（0600 chmod 已 best-effort ✓）、`lock.ts`（mtime stale ✓）、
   `dirclean.ts`、`hooks.ts`（JSON 读写）、ledger 路径比较改走 `samePath`。逐项过一遍，把 `/` 硬编码替换为 `join`。
-- [ ] **T10.4 e2e Windows**：`test/integration/helpers.ts` 在 win32 下的适配（fakeCli 路径、`git` 调用、
+- [x] **T10.4 e2e Windows**（2026-10-13 Windows 10 真机：typecheck 0 错误 + 53 文件 / 881 例全绿，10 例为 POSIX 分支语义在 Windows 主机上结构性构造不出来而按主机跳过）：`test/integration/helpers.ts` 在 win32 下的适配（fakeCli 路径、`git` 调用、
   env 键大小写不敏感——Windows 的 env 是大小写不敏感的，`PATH` 可能是 `Path`）。Windows 真机/VM 上
   `npm test` 全绿。
-- [ ] **T10.5 doctor Windows 检查项**：Git Bash 存在性（FAIL + 安装指引）、hook 命令指向的 bash 路径存在、
+- [x] **T10.5 doctor Windows 检查项**：Git Bash 存在性（FAIL + 安装指引）、hook 命令指向的 bash 路径存在、
   `git` 在 PATH。
-- [ ] **T10.6 文档**：README 去掉「Windows 未支持」，加「Windows 前置：Git for Windows」；AGENTS.md 同步改。
-- [ ] **T10.7 真机**：Windows 机器上 init → pull → 重开 agent 会话验证 hook 自动 pull → doctor 全绿 →
+- [x] **T10.6 文档**：README 去掉「Windows 未支持」，加「Windows 前置：Git for Windows」；AGENTS.md 同步改。
+- [ ] **T10.7 真机（主体完成，2026-10-13）**：Windows 真机 init → pull → doctor 全绿 → uninstall → 逐字节还原全部执行；「重开真实 agent 会话」换成**把安装好的那条 hook 命令真交给六种启动方式跑**，判据从日志增长改成行为（推一条新 skill，hook 跑完它自己回到成员目录）—— 六路全通。剩下的真实会话确认与 `/agents` 同因，登记为遗留。见 `docs/trials/2026-10-13-windows-real-trial.md` §3/§4/§7。
   试验记录 + 逐字节还原（Windows 侧同样按备份还原）。
 
 **回滚**：文档级回退（重新标注不支持）；代码层 platform 分支对 POSIX 无影响。
@@ -525,6 +525,23 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 | contribute 与 push 的规则重复 | — | 遗留：命名空间歧义判定与 frontmatter 拆分各有一处复刻（`cli/contribute.ts`、`core/learning.ts`） | 契约层那两个函数是模块私有的，子代理按约定不改别人的文件。收口成一处导出的机会在下一轮做，**在那之前改 push 的 ns 规则必须同步改 contribute** |
 
 ---
+
+## 7.3 Windows 真机执行期追加（2026-10-13，`docs/trials/2026-10-13-windows-real-trial.md`）
+
+M10 的资源前置到位后第一次在 Windows 真机上跑，下列结论**覆盖本文更早的相应表述**，后续改动照此。
+
+| 项 | 本文 / AGENTS.md 原写法 | 真机结论 | 理由与实测 |
+|---|---|---|---|
+| T10.2 hook 命令形态 | `"<gitbash>" -lc "EJDRONE_HOOK=1 '<node>' '<cli>' pull --silent"` | 工具配置里写 `<wrapper 正斜杠裸路径> EJDRONE_HOOK=1`，`bash -lc` 那整串（含内层单引号）搬进 `~/.ejdrone/hooks/session-start.cmd` | 六路实测：旧形态在 cmd 与 Git Bash 通、**PowerShell/pwsh ParserError**（带引号的可执行路径打头必须配 `&`，而 `&` 在 cmd/bash 里是语法符号）——不存在既带引号首 token 又三 shell 通吃的写法。搬进 wrapper 后六路全通，且 `HOOK_COMMAND_MARKER`、`parseHookPaths` 的依赖一个没动（marker 作尾随参数被 batch 当 `%1` 忽略） |
+| 用 8.3 短路径消掉引号 | —— | **不可采用** | 本机 `D:\Program Files\Git` 所在卷关闭了短名生成：`D:\PROGRA~1` 不存在，`Scripting.FileSystemObject.ShortPath` 原样返回长路径 |
+| 路径含空格（用户名带空格）| 未覆盖 | 唯一可行是 `cmd.exe /c "<wrapper>"`（cmd + PowerShell 通、Git Bash 断，MSYS 把 `/c` 当路径转换），打 `degraded` 标记 + doctor `win:hookbash` WARN | 含空格时无法通吃；宁可口名也不静默 |
+| §3.3 规则 6「含已解析值收紧 0600」 | 无条件红线 | **Windows 表达不出来**：NTFS 无组/其他位，`chmodSync` 只能动只读位，实测权限位停在 `0o666`；保护来自 `%USERPROFILE%` 的 NTFS ACL 继承（同机管理员仍读得到明文 token） | 按用户裁定登记为有意偏差，不新增 `icacls` 子系统（它会改成员既有文件 ACL 且不可回松），列为 2.1 候选 |
+| 「不用 POSIX 测试冒充 Windows 验证」 | 硬约束 | 反向同样成立：**也不能用 Windows 主机跑 POSIX 分支语义**。10 例（`':'` 切 PATH、`X_OK` 恒真、`join()` 产反斜杠、字面 `c:\…` 假路径）在 Windows 主机上结构性构造不出来，改为主机跳过并写明由哪一侧负责 | 27 例红全部来自这一类与权限位，无一例是投递算法缺陷 |
+| Windows e2e 超时 | `testTimeout: 20000` | 按平台抬线：win32 90s / POSIX 保持 20s；临时目录 cleanup 对 ENOTEMPTY/EBUSY/EPERM 重试 | Windows 上 git 子进程慢 2-4 倍，一次 `contribute` 多成员用例撞线；cleanup 撞文件占用 |
+| `findGitBash` 的「没装 Git」分支 | 靠「macOS 上 reg 必然失败」制造 null | 注册表读取器改为显式可注入形参；doctor 的 `gitBash` 同理 | Windows 真机上 reg 会命中本机安装，旧写法把要验证的 FAIL 路径整个漏掉 |
+| 团队仓库 `.gitattributes`（新增交付物） | 本文从未出现 | `ejdrone readme` 的 MR 与空仓库首笔提交带一份 `* text=auto eol=lf`；仓库已有则不带 | Git for Windows 安装器默认 `core.autocrlf=true` → 仓库存 LF、Windows 成员检出 CRLF → 成员换 OS 后所有投递内容被判「本地已修改」，全员静默收不到更新；codex 的 `.toml` 还会嵌进字面 `\r\n` |
+| `submitMrChange` 的 checkout 归属 | 未规定 | 用 `finally` 在任何退出路径把机器克隆还给默认分支（空仓库那一路本就在 targetBranch，不还原） | `createBranch` 切到临时分支而 `fetchReset` 只 `reset --hard` 不改 HEAD；实测 `contribute` 后紧接 `contribute --dry-run` 因「目标路径已存在」被拒 —— 只读命令把未合入内容当团队真相 |
+| uninstall 遇到「撤完区块只剩空白」的文件 | 「留成空文件即可」 | **仍然不删**，但新增一行 `留下空白文件 …` 点名 | 真机留下过 0 字节 `.codex/AGENTS.md` 且零提示，成员以为已清干净。不删的理由与同文件「空目录只报告不删」一致（`~/.codex/AGENTS.md` 是工具原生路径，分不清谁建的），且既有钉子用例 `failure.test.ts` 明确钉着「区块文件绝不整文件删除」——尊重它而不是推翻 |
 
 ## 附：证据清单（2026-10-11 核对）
 

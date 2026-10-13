@@ -67,6 +67,13 @@ owner B 用一条 skip 的用例把这个缺口指出来（这正是它当时测
 
 ## 5. 下一件事
 
+> **2026-10-13 更新**：下面第一条已经执行完毕，见 `docs/trials/2026-10-13-windows-real-trial.md`。
+> 按用户裁定的深度是「隔离 HOME + 真实 shell 执行」：投递产物的**内容级**核对、`recall` 中英文 query
+> 人工判读、`contribute` 全链路（分支→合入→第二成员 pull→recall 命中）、以及把安装好的 hook 命令
+> 真交给 cmd / PowerShell / pwsh / Git Bash 六种启动方式跑并验证行为，全部完成；
+> **未做**的是打开真实工具会话确认 `/agents` 可见（那需要往成员真实配置目录写入）。
+> 本节原文保留，作为当时为什么没做的如实记录。
+
 - 你点头后安排一次真机窗口：`init → pull → 打开 /agents 与 recall → doctor → 按备份逐字节还原`。
 - Windows 那一栏（§2 第 6 项）仍是「代码层已交、真机未跑」，见 `2026-10-11-m10-trial.md`。
 - 本轮改动已落在 `release/2.0-preview` 分支（tag `v2.0.0-preview.0`）；内容级真机窗口仍是欠账，见 §4.1。

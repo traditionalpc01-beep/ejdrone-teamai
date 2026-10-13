@@ -4,7 +4,7 @@
 使用者视角的一切（安装、命令表、投递矩阵、安全边界）在 `README.md`；设计取舍与理由在
 `docs/superpowers/specs/2026-10-11-ejdrone-skills-design.md`。本文件只写改代码前需要知道的事。
 
-## 命令（在仓库根目录执行；POSIX 在 macOS 上真机验证过，Linux 只有测试与夹具，Windows 为代码层就绪、真机未验）
+## 命令（在仓库根目录执行；POSIX 在 macOS 上真机验证过，Linux 只有测试与夹具，Windows 于 2026-10-13 在真机上跑通全量测试与全流程试验，见 `docs/trials/2026-10-13-windows-real-trial.md`）
 
 | 目的 | 命令 |
 |---|---|
@@ -37,10 +37,29 @@
   确需真机试验，按 `docs/trials/2026-10-11-ejdrone-demo-trial.md` §6 回滚，逐字节还原。
 - Windows 平台判断一律调用 `src/platform.ts` 的四个函数（`isWindows` / `findGitBash` / `whichWithPathext` /
   `samePath`），各处不得自己实现平台逻辑——薄委派允许（如 `mcpfmt.whichOn` 直接转发），重复实现不允许。
-- hook 命令的 Windows 形态是 `"<gitbash>" -lc "EJDRONE_HOOK=1 '<node>' '<cli>' pull --silent"`：外层双引号
-  （cmd.exe 不认单引号，且 bash 路径常含空格），**内层单引号不许改**（`HOOK_COMMAND_MARKER` 识别与
-  `parseHookPaths` 都依赖它）；找不到 Git Bash 时 `hookCommand` 返回 null，`init` 降级为提示，不抛错。
+  `findGitBash` 的第三个形参是注册表读取器（默认 `reg query`），**测试要「没装 Git for Windows」这条分支
+  必须注入它**，不要指望主机上没有 `reg`：Windows 真机上 reg 会命中本机安装，旧写法因此把 FAIL 路径漏掉了。
+- hook 命令的 Windows 形态（2026-10-13 真机实测矩阵后定，见 `docs/trials/2026-10-13-windows-real-trial.md` §3）：
+  工具配置里只写 `"<wrapper 正斜杠裸路径> EJDRONE_HOOK=1"`，`"<gitbash>" -lc "EJDRONE_HOOK=1 '<node>' '<cli>' pull --silent"`
+  那整串（**含内层单引号**）写进 `~/.ejdrone/hooks/session-start.cmd`。形状不能改回直接在命令串里跑 bash：
+  带引号的首 token 在 PowerShell/pwsh 下是 ParserError（它们要求 `&`），而 `&` 在 cmd 与 bash 里是语法符号，
+  不存在既带引号首 token 又三 shell 通吃的写法；8.3 短路径不可依赖（卷可能关闭短名生成）；
+  反斜杠裸路径会被 Git Bash 当转义吃掉，所以 wrapper 用正斜杠且不加引号。
+  内层单引号仍是 `HOOK_COMMAND_MARKER` 识别与 `parseHookPaths` 的依赖，只是搬进 wrapper 正文 ——
+  因此读这两个值的路径必须先经 `parseHookWrapper` 把正文取出来（`doctor.hookPayloadOf` 就是这么做的）。
+  找不到 Git Bash 时 `hookCommand` 返回 null，`init` 降级为提示，不抛错；状态目录路径含空格时唯一写法是
+  `cmd.exe /c "…"`（Git Bash 那一路会断），必须打 `degraded` 标记并由 doctor `win:hookbash` WARN，不许静默。
   裸 `bash` 永远不用（解析到 WSL 启动器，hook 静默崩）。
+- `submitMrChange` 用 `finally` 把机器克隆的 checkout 还给默认分支：`createBranch` 会切到临时分支，
+  `fetchReset` 只 `reset --hard` 不改 HEAD，不还原的话 `status` / `list` / `contribute --dry-run`
+  会把未合入的内容当团队真相（真机实测复现过一次 `--dry-run` 因「目标路径已存在」被拒）。
+- 团队仓库的 `.gitattributes`（`* text=auto eol=lf`）由 `ejdrone readme` 与空仓库首笔提交带进去，
+  仓库里已有时绝不覆盖。缺它时 Windows 成员（`core.autocrlf=true` 是 Git for Windows 安装器默认）
+  检出 CRLF，换 OS 后所有投递内容被判「本地已修改」而静默收不到更新。本仓自己也有这一份：
+  没有它 `readBuiltinSkills()` 在 Windows 上读到 CRLF，内置技能的逐字节断言与下发内容都会抖。
+- uninstall 撤区块标记后若文件只剩空白（说明它本来只为我们的区块而存在），**仍然不删**：区块文件住在
+  `~/.codex/AGENTS.md` 这类工具原生路径上，分不清是不是工具自己要建的，与「空目录只报告不删」同一条理由；
+  但必须打一行 `留下空白文件 …`，不能让人以为已经清干净。有标记外内容则逐字节保留且不报这一行。
 - 路径相等比较走 `samePath`（Windows 大小写不敏感、`\`/`/` 等价），不许直接 `===`——已收口两处：
   `core/ledger.ts` 的 `ledgerEntry` 与 `cli/doctor.ts` 的 hook cli 归属核对；新增路径比较照此办理。
 - 所有原子写统一走 `ledger.ts` 导出的 `replaceFileSync`（共四处：`state.ts` saveConfig / `hooks.ts`
@@ -70,6 +89,10 @@
   格式化抖动不算改过；TOML 按表块原文逐字节）。卸载时用 `managedKeys` 反向合并 `desired={}` 只撤自己那几条。
 - 把 `${VAR}` 解析成明文写进成员文件时，该文件必须收紧到 0600：判据由 planMcp 标在 `merge.hasResolvedValue` 上，
   **不要让 apply 猜内容像不像密钥**（猜会把不含密钥的文件也改权限）。权限只收紧不回松。
+  **Windows 上这条表达不出来**：NTFS 没有组/其他权限位，Node 的 `chmodSync` 只能动只读位，
+  `statSync().mode` 对普通可写文件恒 `0o666`。实际保护来自 `%USERPROFILE%` 的 NTFS ACL 继承
+  （同机管理员仍可读明文 token），登记为有意偏差；`icacls` 收紧会改成员既有文件 ACL 且不可回松，列为 2.1 候选。
+  权限断言一律走 `test/helpers/mode.ts`，不要在测试里直接 `toBe(0o600)`。
 - `mcp/mcp.yaml` 解析不出来 = MCP 整体停发，**不是空集**：当成空集会把全员已装的 server 全删掉。
   判定在 `snapshot.mcpFileError`，`buildDelivery` 据此把 `mcp` 加进 `haltedKinds`，pull 退出码 1。
 - 工具有没有某项能力由 `paths.ts` 的表决定（`mcpTarget` 缺席 → 适配器不实现 `planMcp`），

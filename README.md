@@ -14,8 +14,11 @@ ejdrone --version
 
 2.0 目前以 **preview** 形态发：六类资源（skills / rules / mcp / agents / docs / learnings）的代码与测试都已就位。
 验证状态分三档，按档取用：skills / rules / MCP 在 macOS 真机上走过投递与卸载还原；
-子 Agent、团队知识、经验沉淀只有夹具级逐字节对拍（没有开真实工具会话确认 `/agents` 与 `recall` 的实际表现）；
-Windows 只到代码层，没做过真机。预发布号不会被裸 `npm install -g ejdrone-skills` 选中，所以装它要显式带版本号。
+Windows 在 2026-10-13 上过真机（全量测试 + `init→pull→hook→doctor→uninstall` 全流程，
+见 `docs/trials/2026-10-13-windows-real-trial.md`），但**没有**往成员真实在用的工具配置目录写入，
+所以「打开真实工具会话确认 `/agents` 列出投出去的 agent」这一档仍未验；
+子 Agent、团队知识、经验沉淀的验证是夹具逐字节对拍 + 真机行为级（hook 六种启动方式真跑、`recall` 中英文判读、`contribute` 全链路）。
+预发布号不会被裸 `npm install -g ejdrone-skills` 选中，所以装它要显式带版本号。
 
 前置：Node.js ≥ 20、git。Windows 另需 Git for Windows（hook 走它的 bash.exe 绝对路径）。
 
@@ -250,18 +253,30 @@ ejdrone contribute --file ./notes.md --dry-run  # 只看会写成什么样，一
 
 ## Windows
 
-**代码层已就绪，真机未验证** —— 2.0-preview 的这一档就是留给 Windows 机器补的：所有 Windows 分支都过不了
-「用 POSIX 测试冒充验证」这条线，所以下面写的是实现方式，不是已验证结论。逐项待验清单见
-`docs/trials/2026-10-11-m10-trial.md` §4。前置是 **Git for Windows**（https://git-scm.com/download/win）：
-Node ≥ 20 与 Git for Windows 装上即可，其余与 macOS/Linux 相同。
+**已在 Windows 10 真机上验证**（2026-10-13：全量测试 53 文件 / 881 例绿，`init → pull → hook 自动 pull →
+doctor → uninstall` 全流程跑通，逐字节还原对账见 `docs/trials/2026-10-13-windows-real-trial.md`）。
+前置是 **Git for Windows**（https://git-scm.com/download/win）：Node ≥ 20 与 Git for Windows 装上即可，
+其余与 macOS/Linux 相同。
 
 - 会话自动 pull 的 hook 命令走 Git Bash 的 `bash.exe` **绝对路径**，五路查找：`%ProgramFiles%\Git`、
   `%ProgramFiles(x86)%\Git`、`%LOCALAPPDATA%\Programs\Git`（非管理员装 Git for Windows 的默认位置，
   企业电脑极常见），再加注册表 `HKLM` 与 `HKCU` 的 `SOFTWARE\GitForWindows`。刻意不用 PATH 上的裸 `bash`——它会解析到
   WSL 启动器，跑起来的不是 MSYS2 环境，hook 会静默失效。
+- 工具配置里那条命令是 `"<你的状态目录>/hooks/session-start.cmd EJDRONE_HOOK=1"`，真正的
+  `bash -lc "…"` 在那份 wrapper 文件里。这么绕是因为实测下来**带引号的可执行路径打头**在
+  PowerShell / pwsh 里是语法错误（它们要求 `&`），而 `&` 在 cmd 与 bash 里又是语法符号 ——
+  把带引号的一层收进文件，cmd.exe、PowerShell、pwsh、Git Bash 六种启动方式才全部跑得起来。
+  状态目录路径含空格时退到 `cmd.exe /c` 包装（PowerShell 与 cmd 正常，Git Bash 那一路不触发），
+  `doctor` 会 WARN 点名，不会静默。
 - 没装 Git for Windows 时 hook 不安装，`init` 会点名提示；这不影响手动 `ejdrone pull`，
   `doctor` 的 `win:gitbash` / `win:git` / `win:hookbash` 三项会逐条告诉你缺什么。
 - MCP 条目里的 `requires:` 在 Windows 上按 `PATHEXT` 探测（`npx` 命中 `npx.cmd` 也算数）。
+- **明文密钥的文件权限**：POSIX 上写 `${VAR}` 解析值会把文件收紧到 `0600`；Windows 上 NTFS 没有组/其他
+  权限位，`chmod` 表达不出来（实测权限位停在 `666`）。那里的保护来自你用户目录的 NTFS ACL 继承
+  —— 同机其他用户默认读不到，但**本机管理员仍读得到明文 token**。这是本轮登记的有意偏差，不是遗漏。
+- **行尾**：团队仓库需要一份 `.gitattributes`（`* text=auto eol=lf`），`ejdrone readme` 与空仓库首笔提交
+  会自动带上。缺它时 Windows 成员（Git for Windows 默认 `core.autocrlf=true`）检出的是 CRLF，
+  换到 mac/Linux 后所有投递内容会被判成「本地已修改」而收不到更新。
 
 ## 为什么 rules 有四种投递方式
 
