@@ -297,8 +297,8 @@ headless 仍不可用，但根因比 §7.3 记录的更深一层：`127.0.0.1:15
 但它是**另一个网关**——用成员 `ANTHROPIC_AUTH_TOKEN` 直连 `/v1/messages` 得 401 `Invalid token`
 （`/v1/models` 200 说明服务本身活着）。即成员自己的 claude 路由器并没在跑，端口被占。
 因此本轮目视不走 headless，改用 TUI 路线：`/agents` 面板与 SessionStart hook 都是客户端行为，不依赖模型出口。
-截图与脚本留在 `%TEMP%\ga-verify\`（shot-*.png、ga-chain.mjs、ga-hkcu.mjs、canary-settings.json、
-hook-settings.json、agents-baseline-manifest.txt）。
+截图、设置文件与对账 manifest 留在 `%TEMP%\ga-verify\`（shot-*.png、canary-settings.json、hook-settings.json、
+agents-baseline-manifest.txt / agents-after-manifest.txt）；两个一次性脚本在 `%TEMP%` 根（ga-chain.mjs、ga-hkcu.mjs）。
 
 ### 9.1 真实会话 `/agents` 目视（项目级）
 
