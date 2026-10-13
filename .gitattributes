@@ -1,0 +1,8 @@
+# 与 `ejdrone readme` 带进团队仓库的是同一条纪律：Git for Windows 安装器默认 core.autocrlf=true，
+# 没有这份文件时 Windows 上检出的 skills/*.md 是 CRLF，readBuiltinSkills() 读到的正文
+# 与团队仓库里 LF 的那份逐字节不等 —— 端到端断言与内置技能的下发内容都会因此抖动。
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+*.zip binary

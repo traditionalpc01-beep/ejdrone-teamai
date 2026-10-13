@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { doctorCommand } from '../../src/cli/doctor.js';
 import { createContext } from '../../src/cli/context.js';
 import type { Config } from '../../src/core/types.js';
-import { saveConfig } from '../../src/state.js';
+import { hookWrapperPath, saveConfig } from '../../src/state.js';
+import { findGitBash } from '../../src/platform.js';
 
 /**
  * M10 / T10.5：doctor 的 Windows 三项检查（win:gitbash / win:git / win:hookbash）。
@@ -60,6 +61,8 @@ function makeEnv(tag: string, overrides: NodeJS.ProcessEnv = {}): NodeJS.Process
 async function runDoctor(
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
+  /** 注入 win:gitbash 的定位结果：真 Windows 上 reg 会命中本机 Git，不能靠主机环境制造「没装」 */
+  gitBash: string | null = findGitBash(env, platform),
 ): Promise<{ code: number; report: DoctorReport }> {
   const lines: string[] = [];
   const ctx = createContext({
@@ -69,7 +72,7 @@ async function runDoctor(
     err: () => {},
     interactive: false,
   });
-  const code = await doctorCommand(ctx, { json: true }, platform);
+  const code = await doctorCommand(ctx, { json: true }, platform, gitBash);
   return { code, report: JSON.parse(lines.join('\n')) as DoctorReport };
 }
 
@@ -110,16 +113,24 @@ function fakeCli(): string {
   return path;
 }
 
-/** Windows 形态的 hook 命令原文（与 constants.ts hookCommand 的 win32 分支同形）。 */
-function windowsHookCommand(bashPath: string): string {
-  return `"${bashPath}" -lc "EJDRONE_HOOK=1 '${process.execPath}' '${fakeCli()}' pull --silent"`;
+/**
+ * Windows 形态的 hook 命令原文（与 constants.ts hookCommand 的 win32 分支同形）：
+ * 工具配置里只留 `<wrapper 正斜杠裸路径> EJDRONE_HOOK=1`，`"<bash>" -lc "…"` 那层写进
+ * 状态目录下的 wrapper 文件 —— doctor 要先按命令找到 wrapper、再从正文里取 bash 段。
+ */
+function windowsHookCommand(env: NodeJS.ProcessEnv, bashPath: string): string {
+  const wrapper = hookWrapperPath(env);
+  mkdirSync(dirname(wrapper), { recursive: true });
+  writeFileSync(wrapper, `@echo off\r\n"${bashPath}" -lc "EJDRONE_HOOK=1 '${process.execPath}' '${fakeCli()}' pull --silent"\r\n`, 'utf8');
+  return `${wrapper.split('\\').join('/')} EJDRONE_HOOK=1`;
 }
 
 describe('win:gitbash', () => {
   it('找不到 Git for Windows 时报 FAIL，消息与指引都点到 Git for Windows', async () => {
-    // 无 ProgramFiles / ProgramFiles(x86)：macOS 上 reg 也必然失败 → 找不到
+    // 注入 null 而不是"指望主机上没有 reg"：Windows 真机上 reg 会命中本机 Git 安装，
+    // 旧写法在这台机器上直接得到 PASS，恰好把这条 FAIL 路径漏掉。
     const env = makeEnv('gitbash-fail');
-    const { report } = await runDoctor(env, 'win32');
+    const { report } = await runDoctor(env, 'win32', null);
 
     const check = checkOf(report, 'win:gitbash');
     expect(check.status).toBe('FAIL');
@@ -179,7 +190,7 @@ describe('win:hookbash', () => {
     writeFileSync(bashExe, '#!/bin/sh\n', 'utf8');
     const env = makeEnv('hookbash-pass');
     seedConfig(env);
-    seedClaudeSettings(env, windowsHookCommand(bashExe));
+    seedClaudeSettings(env, windowsHookCommand(env, bashExe));
 
     const { report } = await runDoctor(env, 'win32');
 
@@ -193,7 +204,7 @@ describe('win:hookbash', () => {
     const dead = 'C:\\Program Files\\Git\\bin\\bash.exe';
     const env = makeEnv('hookbash-fail');
     seedConfig(env);
-    seedClaudeSettings(env, windowsHookCommand(dead));
+    seedClaudeSettings(env, windowsHookCommand(env, dead));
 
     const { report } = await runDoctor(env, 'win32');
 
@@ -237,7 +248,7 @@ describe('POSIX 零变化', () => {
     writeFileSync(bashExe, '#!/bin/sh\n', 'utf8');
     const env = makeEnv('posix', { ProgramFiles: join(root, 'pf'), PATH: join(root, 'bin') });
     seedConfig(env);
-    seedClaudeSettings(env, windowsHookCommand(bashExe));
+    seedClaudeSettings(env, windowsHookCommand(env, bashExe));
 
     const { report } = await runDoctor(env, 'darwin');
 
@@ -251,11 +262,12 @@ describe('POSIX 零变化', () => {
 // ------------------------------------------------------------------ D1：hook cli 归属核对走 samePath
 
 describe('hook:xxx 的 cli 归属核对（M10：samePath 取代裸 ===）', () => {
-  // 绝对路径 + 反斜杠大小写变体：win32 的 samePath 判同一路径，POSIX 的 === 判不同。
-  // macOS 上反斜杠是合法文件名字符，两个变体都能造成真实存在的文件，
-  // 让 existsSync(paths.node / paths.cli) 都通过，比较才会走到归属判定。
-  const cliLower = (): string => `${root}/c:\\users\\dev\\cli.js`;
-  const cliUpper = (): string => `${root}/C:\\Users\\Dev\\cli.js`;
+  // 大小写变体用 root 下的真实文件名，不用字面 `c:\\users\\dev\\cli.js`：
+  // 反斜杠在 macOS 上是合法文件名字符，在 Windows 上却让 writeFileSync 直接 ENOENT
+  // （`...\c:` 不是有效目录段）。用真文件名的两个大小写写法，两种主机都能造出真实存在的路径，
+  // 而 win32/POSIX 对「它们是不是同一个文件」的分歧正是要验的东西。
+  const cliLower = (): string => join(root, 'cli.js');
+  const cliUpper = (): string => join(root, 'CLI.js');
 
   function seedCaseVariantHook(env: NodeJS.ProcessEnv): void {
     writeFileSync(cliLower(), '// cli\n', 'utf8');

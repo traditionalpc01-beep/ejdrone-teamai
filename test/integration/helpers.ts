@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 
 import { TOOL_PATHS } from '../../src/agents/paths.js';
 import { runCli, type CliContextInput } from '../../src/cli.js';
-import { findGitBash } from '../../src/platform.js';
+import { win32Hook } from '../../src/cli/constants.js';
 
 /**
  * 端到端夹具：真实 git（`git init --bare` 当 origin），绝不 mock child_process。
@@ -187,24 +187,51 @@ export function createHarness(): Harness {
         .map((name) => name.replace('refs/heads/', '')),
     seedRead: (rel) => readFileSync(join(seed, rel), 'utf8'),
     cleanup: () => {
-      rmSync(work, { force: true, recursive: true });
+      removeTree(work);
     },
   };
 }
 
 /**
+ * Windows 上刚跑完 git 子进程的临时目录常还在被短暂占用，直接 rmSync 会 ENOTEMPTY / EBUSY /
+ * EPERM（真机实测：一次 contribute 用例主体已过、cleanup 报错，把通过的用例记成失败）。
+ * 重试几次即可放行；POSIX 上第一次就成功，行为不变。
+ */
+function removeTree(dir: string): void {
+  const transient = new Set(['ENOTEMPTY', 'EBUSY', 'EPERM', 'EMFILE', 'ENFILE']);
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      rmSync(dir, { force: true, recursive: true });
+      return;
+    } catch (e) {
+      lastError = e;
+      const code = (e as { code?: string }).code ?? '';
+      if (!transient.has(code)) break;
+      sleepMs(150);
+    }
+  }
+  throw lastError;
+}
+
+/** 同步等待：cleanup 是同步钩子，不能 await。 */
+function sleepMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
  * 按当前 process.platform 推导期望的 hook 命令原文（与 src/cli/constants.ts 的 hookCommand 同形）：
  * POSIX 是 `EJDRONE_HOOK=1 '<node>' '<cli>' pull --silent`；
- * win32 找不到 Git Bash 时返回 null —— 那种机器上 init 不装 hook，只打印安装指引，
- * 调用方据此跳过落盘断言（macOS CI 走的永远是非 null 分支，等价于原有精确断言）。
+ * win32 是 `<wrapper.cmd 正斜杠裸路径> EJDRONE_HOOK=1`（payload 在 wrapper 文件里，
+ * 因为实测 `"<bash>" -lc "…"` 这种带引号首 token 在 PowerShell/pwsh 下是语法错误）；
+ * win32 找不到 Git Bash 时返回 null —— 那种机器上 init 不装 hook，只打印安装指引。
  */
 export function expectedHookCommand(env: NodeJS.ProcessEnv): string | null {
   const node = env.EJDRONE_NODE ?? process.execPath;
   const cli = env.EJDRONE_CLI ?? '';
   if (process.platform !== 'win32') return `EJDRONE_HOOK=1 '${node}' '${cli}' pull --silent`;
-  const bash = findGitBash(env);
-  if (bash === null) return null;
-  return `"${bash}" -lc "EJDRONE_HOOK=1 '${node}' '${cli}' pull --silent"`;
+  // win32 直接委派给被测同一入口，避免测试里再复刻一份形态（形态改动只发生在一处）
+  return win32Hook(env)?.command ?? null;
 }
 
 /** 标准团队仓库：根条目 + be/fe 两个 namespace + 多文件 skill */

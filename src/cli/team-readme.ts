@@ -170,3 +170,31 @@ cat ~/.ejdrone/debug.log   # 会话自动同步的失败记录
 这个工具不做密钥托管（v1 未实现 \`env/secrets\`），请用环境变量或各工具自己的凭据存储。
 `;
 }
+
+/**
+ * 团队仓库的 `.gitattributes`（2026-10-13 Windows 真机试验引出）。
+ *
+ * 为什么必须由工具带进仓库、不能靠成员自觉：Git for Windows 安装器默认把
+ * `core.autocrlf=true` 写进用户级配置，于是同一份团队仓库在 mac/Linux 成员机器上检出是 LF、
+ * 在 Windows 成员机器上检出是 CRLF。投递产物跟着检出走，结果是：
+ *  - 成员从 mac 换到 Windows（或反过来）后，账本里每个文件的哈希都对不上，
+ *    pull 把**全部内容**判成「本地已修改」→ 全员静默收不到更新，只有一屏点名；
+ *  - codex 的 agent `.toml` 会把正文里的 CRLF 转义成字面 `\r\n` 嵌进 developer_instructions。
+ * 一条 `eol=lf` 就把跨 OS 团队的字节一致性钉死，成本是仓库里多一个文件。
+ */
+export function teamGitattributes(): string {
+  return [
+    '# 由 ejdrone 写入：团队资产的文件尾统一 LF，不随成员的 core.autocrlf 变化。',
+    '# 删掉这个文件会让 Windows 成员检出 CRLF，换机后所有投递内容被判成「本地已修改」。',
+    '* text=auto eol=lf',
+    '# 二进制资产（图标、字体、压缩包）不做行尾转换',
+    '*.png binary',
+    '*.jpg binary',
+    '*.jpeg binary',
+    '*.gif binary',
+    '*.ico binary',
+    '*.zip binary',
+    '*.gz binary',
+    '',
+  ].join('\n');
+}

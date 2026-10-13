@@ -64,8 +64,18 @@ describe('findGitBash（Git for Windows 的 bash.exe 定位）', () => {
     expect(findGitBash({ ProgramFiles: dir, LOCALAPPDATA: userRoot }, 'win32')).toBe(systemBash);
   });
 
-  it('候选全没有、reg 也没有（macOS 上 reg 必然失败）→ null', () => {
-    expect(findGitBash(HOME_ENV, 'win32')).toBeNull();
+  it('候选全没有、注册表也没有 → null', () => {
+    // 旧写法靠「macOS 上 reg 必然失败」来制造 null，在 Windows 真机上 reg 是真会命中的
+    // （本机 D:\Program Files\Git 就写在 HKLM 里），于是这条永远测不到想找的那条分支。
+    // 注册表读取器现在是显式入参，任何主机上都能注入。
+    expect(findGitBash(HOME_ENV, 'win32', () => null)).toBeNull();
+  });
+
+  it('注册表命中时按 <InstallPath>\\bin\\bash.exe 找到（非标准盘符安装）', () => {
+    const bash = join(dir, 'bin', 'bash.exe');
+    mkdirSync(join(dir, 'bin'), { recursive: true });
+    writeFileSync(bash, 'MZ fake', 'utf8');
+    expect(findGitBash(HOME_ENV, 'win32', () => dir)).toBe(bash);
   });
 
   it('非 win32：无视 env 直接 null（不碰 env、不跑 reg）', () => {
@@ -128,7 +138,13 @@ describe('whichWithPathext（win32 分支：PATHEXT 查找）', () => {
   });
 });
 
-describe('whichWithPathext（POSIX 退化分支：语义同 whichOn）', () => {
+// 这一整块验的是 POSIX 分支的语义，只有在 POSIX 主机上才成立：
+//  - `accessSync(X_OK)` 在 Windows 上对所有普通文件都返回成功，0o644 也「可执行」；
+//  - 该分支按 ':' 切 PATH，而 Windows 临时目录本身是 `C:\...`，盘符冒号先把 PATH 切坏；
+//  - 夹具用 join() 造路径，win32 下产出反斜杠，与被测的 '/' 判据不是一回事。
+// 真 Windows 主机上跳过不算覆盖缺口：POSIX 语义由 macOS/Linux CI 负责，
+// win32 语义由上面那块 PATHEXT 用例负责，两边都不靠"在对方主机上模拟"。
+describe.skipIf(process.platform === 'win32')('whichWithPathext（POSIX 退化分支：语义同 whichOn）', () => {
   let dirA: string;
   let dirB: string;
   beforeEach(() => {

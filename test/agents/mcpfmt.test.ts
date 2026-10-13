@@ -246,7 +246,9 @@ describe('whichOn（requires 的 PATH 探测，POSIX 先行）', () => {
     return p;
   }
 
-  it('PATH 上有可执行文件 → 返回其绝对路径', () => {
+  it.skipIf(process.platform === 'win32')('PATH 上有可执行文件 → 返回其绝对路径', () => {
+    // POSIX 分支按 ':' 切 PATH，而 Windows 的临时目录自带盘符冒号（C:\Users\...），
+    // 夹具 PATH 一进去就被切坏。这条验的是 POSIX 语义，win32 语义由下面的 PATHEXT 用例负责。
     makeBin('fake-tool', 0o755);
     expect(whichOn('fake-tool', { PATH: dir }, 'linux')).toBe(join(dir, 'fake-tool'));
   });
@@ -263,7 +265,8 @@ describe('whichOn（requires 的 PATH 探测，POSIX 先行）', () => {
     expect(whichOn('a-dir', { PATH: dir }, 'linux')).toBeNull();
   });
 
-  it('含 / 的 name 不做 PATH 拼接：绝对路径直接探测，相对路径判不存在', () => {
+  it.skipIf(process.platform === 'win32')('含 / 的 name 不做 PATH 拼接：绝对路径直接探测，相对路径判不存在', () => {
+    // 同上：POSIX 分支的判据是 name 里含 '/'，而 win32 主机上 join() 产出反斜杠，构造不出被测形态
     const p = makeBin('abs-tool', 0o755);
     expect(whichOn(p, HOME_ENV, 'linux')).toBe(p);
     expect(whichOn('./fake', { PATH: dir }, 'linux')).toBeNull();

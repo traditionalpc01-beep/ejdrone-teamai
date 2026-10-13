@@ -159,3 +159,37 @@ describe('与 push 保留名守卫的接口', () => {
     expect(h.seedRead(recall.repoPath)).toBe(recall.content);
   });
 });
+
+describe('readme 把行尾约定一起带进仓库（2026-10-13 Windows 真机试验引出）', () => {
+  // Git for Windows 安装器默认写 core.autocrlf=true：没有 .gitattributes 时，同一份团队仓库
+  // 在 Windows 成员机器上检出 CRLF、mac/Linux 上 LF，成员换 OS 后所有投递内容会被判成
+  // 「本地已修改」——全员静默收不到更新。这条钉子把它钉在引导提交里。
+  it('仓库没有 .gitattributes → MR 带上它，内容钉死 eol=lf', async () => {
+    const member = await memberWithRepo('readme-gitattributes-add');
+    const done = await member.run(['readme']);
+    expect(done.code, done.all).toBe(0);
+
+    const branch = readmeBranches()[0] as string;
+    expect(mrPaths(member, branch)).toContain('.gitattributes');
+
+    h.mergeIntoMain(branch);
+    const pulled = await member.run(['pull']);
+    expect(pulled.code, pulled.all).toBe(0);
+    expect(h.seedRead('.gitattributes')).toContain('* text=auto eol=lf');
+  });
+
+  it('仓库已有 .gitattributes（团队定制过）→ 绝不覆盖，也不带进 MR', async () => {
+    const member = await memberWithRepo('readme-gitattributes-keep');
+    h.writeSeed('.gitattributes', '*.md eol=crlf\n');
+    h.commitSeed('team pins its own line endings');
+    // 成员侧的 checkout 要 pull 一次才看得到：readme 的判据读的是本地 checkout
+    expect((await member.run(['pull'])).code).toBe(0);
+    expect(member.exists('.ejdrone', 'repo', '.gitattributes')).toBe(true);
+
+    const done = await member.run(['readme']);
+    expect(done.code, done.all).toBe(0);
+    const branch = readmeBranches()[0] as string;
+    expect(mrPaths(member, branch)).not.toContain('.gitattributes');
+    expect(h.seedRead('.gitattributes')).toBe('*.md eol=crlf\n');
+  });
+});

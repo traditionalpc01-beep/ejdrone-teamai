@@ -1,8 +1,11 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+
 import { registry } from '../agents/index.js';
 import type { AgentAdapter, Config } from '../core/types.js';
 import { loadConfig, saveConfig } from '../state.js';
 import { splitList, type CliContext } from './context.js';
-import { hookCommand } from './constants.js';
+import { hookCommand, win32Hook, type Win32Hook } from './constants.js';
 import { pullOnce } from './pull.js';
 import { openSnapshot, type Snapshot } from './snapshot.js';
 
@@ -134,6 +137,10 @@ function installHooks(ctx: CliContext, adapters: AgentAdapter[]): void {
     }
     return;
   }
+  // Windows 的 payload 住在 wrapper 文件里：先把 wrapper 落盘，再把它指向的那条命令写进工具配置。
+  // 顺序反了会出现「hook 已装但 wrapper 不存在」的中间态 —— 会话开起来只有一次静默失败。
+  const win = win32Hook(ctx.env);
+  if (win !== null && !writeHookWrapper(ctx, win)) return;
   for (const adapter of adapters) {
     const outcome = adapter.installHook(ctx.home, ctx.env, cmd);
     if (outcome.installed) {
@@ -142,6 +149,23 @@ function installHooks(ctx: CliContext, adapters: AgentAdapter[]): void {
       ctx.out(`hook：${adapter.label} 未安装 —— ${outcome.reason ?? '该工具无 hook 机制，请手动运行 ejdrone pull'}`);
     }
   }
+}
+
+/** wrapper 落盘；失败时点名并返回 false（不抛错，与 hook 一贯的降级姿态一致）。 */
+function writeHookWrapper(ctx: CliContext, win: Win32Hook): boolean {
+  try {
+    mkdirSync(dirname(win.wrapperPath), { recursive: true });
+    writeFileSync(win.wrapperPath, win.wrapperBody, 'utf8');
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    ctx.err(`错误：hook wrapper 写不出来（${win.wrapperPath}）：${why}`);
+    ctx.err('      会话自动 pull 未安装；修好目录权限后重跑 ejdrone init --force，手动 ejdrone pull 不受影响。');
+    return false;
+  }
+  if (win.degraded) {
+    ctx.out('提示：你的状态目录路径含空格，hook 命令退到 cmd.exe /c 包装形态 —— 用 Git Bash 执行 hook 的工具不会触发自动 pull（doctor 会点名）。');
+  }
+  return true;
 }
 
 export async function initCommand(ctx: CliContext, repo: string | undefined, options: InitOptions): Promise<number> {

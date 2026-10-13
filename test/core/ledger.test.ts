@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { hashContent, ledgerEntry, loadLedger, replaceFileSync, saveLedger } from '../../src/core/ledger.js';
 import type { Ledger } from '../../src/core/types.js';
 
+import { expectNotGroupReadable } from '../helpers/mode.js';
 let root = '';
 afterEach(() => {
   if (root) rmSync(root, { recursive: true, force: true });
@@ -133,8 +134,7 @@ describe('saveLedger', () => {
     const dir = tmp();
     const p = join(dir, 'ledger.json');
     saveLedger(p, { version: 1, entries: [] });
-    const mode = statSync(p).mode & 0o777;
-    expect(mode & 0o077).toBe(0);
+    expectNotGroupReadable(p);
   });
 });
 
@@ -151,7 +151,10 @@ describe('ledgerEntry', () => {
     expect(ledgerEntry(ledger, '/c')).toBeUndefined();
   });
 
-  it('POSIX：大小写不同 / 斜杠不同都算不同文件（找不到）', () => {
+  it.skipIf(process.platform === 'win32')('POSIX：大小写不同 / 斜杠不同都算不同文件（找不到）', () => {
+    // ledgerEntry 不带 platform 形参，走的是 samePath 的 process.platform 默认值：
+    // 这条断言描述的是 POSIX 语义，在真 Windows 上「大小写不同算同一条」才是正确行为
+    // （由下一条 win32 用例负责），所以按主机平台跳过，不算未覆盖。
     const ledger: Ledger = {
       version: 1,
       entries: [

@@ -194,7 +194,8 @@ describe('MCP 投递与成员内容共存', () => {
 
     const pull = await member.run(['pull']);
     expect(pull.code, pull.all).toBe(1);
-    expect(pull.all).toContain('mcp/mcp.yaml');
+    // 点名消息里是 checkout 下的绝对路径（Windows 反斜杠），断言前归一斜杠
+    expect(pull.all.split('\\').join('/')).toContain('mcp/mcp.yaml');
     expect(pull.all).toContain('停发');
 
     expect(member.read('.claude.json')).toBe(before);

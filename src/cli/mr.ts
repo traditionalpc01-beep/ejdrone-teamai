@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { Config } from '../core/types.js';
-import { teamReadme } from './team-readme.js';
+import { teamGitattributes, teamReadme } from './team-readme.js';
 import { commitAll, createBranch, isDirty, listRemoteBranches, prePushScan, push, removePaths, writeFiles } from '../git/repo.js';
 import { makeGitProvider } from '../git/provider.js';
 import { newMrWebUrl, parseRepoRef } from '../git/gitlab.js';
@@ -84,12 +84,42 @@ async function submitMrChangeInner(
 
   // from 用远端分支名：复用时就从那条分支继续，新建时从默认分支继续；空仓库无起点
   await createBranch(dir, branch, bootstrap ? undefined : existing ?? targetBranch, ctx.env);
+  // checkout 停在临时分支期间，`--dry-run`/`status` 这类只读命令会把「还没合入的内容」当成
+  // 团队真相（2026-10-13 Windows 真机实测：contribute 之后紧接着 `contribute --dry-run`
+  // 因「目标路径已存在」被拒）。整段用 finally 包住，任何退出路径都把工作树还给默认分支。
+  // 空仓库那一路本来就落在 targetBranch 上；还原只在 createBranch 之后生效，不会吃掉待提交内容。
+  try {
+    return await finishMrChange(ctx, config, snapshot, change, { branch, targetBranch, bootstrap });
+  } finally {
+    if (!bootstrap) {
+      try {
+        await createBranch(dir, targetBranch, targetBranch, ctx.env);
+      } catch {
+        // 还原失败不改变本次结果：下一次 pull 的 fetchReset 会把工作树校正回 origin/<默认分支>
+      }
+    }
+  }
+}
+
+async function finishMrChange(
+  ctx: CliContext,
+  config: Config,
+  snapshot: Snapshot,
+  change: MrChange,
+  state: { branch: string; targetBranch: string; bootstrap: boolean },
+): Promise<MrOutcome> {
+  const { branch, targetBranch, bootstrap } = state;
+  const dir = snapshot.dir;
 
   const written = Object.entries(change.files);
   if (bootstrap && !('README.md' in change.files) && !existsSync(join(dir, 'README.md'))) {
     // 空仓库的第一笔提交顺手把首页说明书放进去：新同事打开仓库就该看得见怎么加入，
     // 而不是靠有人在群里再贴一遍命令。
     written.push(['README.md', teamReadme(config.repo, targetBranch)]);
+  }
+  if (bootstrap && !('.gitattributes' in change.files) && !existsSync(join(dir, '.gitattributes'))) {
+    // 同上：第一笔提交就把行尾钉成 LF，别让第一个 Windows 成员把 CRLF 提交进团队真相。
+    written.push(['.gitattributes', teamGitattributes()]);
   }
   if (written.length > 0) {
     writeFiles(dir, Object.fromEntries(written.map(([rel, content]) => [`./${rel}`, content])));

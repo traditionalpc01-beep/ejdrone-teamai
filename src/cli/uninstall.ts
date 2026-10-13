@@ -10,7 +10,7 @@ import { hashContent, loadLedger, replaceFileSync, saveLedger } from '../core/le
 import { BLOCK_END, BLOCK_RESOURCE_KEY, BLOCK_START } from '../agents/block.js';
 import { locateRegion, normalizeInner, stripRegion } from '../core/region.js';
 import type { LedgerEntry } from '../core/types.js';
-import { configPath, ledgerPath, loadConfig } from '../state.js';
+import { configPath, hookWrapperPath, ledgerPath, loadConfig } from '../state.js';
 import type { CliContext } from './context.js';
 import { managedRoots } from './delivery.js';
 import { pruneAfterDeletions } from './dirclean.js';
@@ -89,6 +89,19 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
     }
   }
 
+  // Windows 的 hook payload 存在自家状态目录的 wrapper 文件里。hook 条目已上面清掉，
+  // wrapper 留着就是一段没人引用的死代码；它在 ~/.ejdrone 下（我们建的），删不影响成员目录。
+  const wrapper = hookWrapperPath(ctx.env);
+  if (existsSync(wrapper)) {
+    try {
+      unlinkSync(wrapper);
+      ctx.out(`hook wrapper：${wrapper} 已删除`);
+    } catch (e) {
+      ctx.out(`hook wrapper 删除失败：${e instanceof Error ? e.message : String(e)}`);
+      ctx.out(`        下一步：手动删掉 ${wrapper}（工具侧 hook 条目已清理，留着不会被执行）`);
+    }
+  }
+
   const file = ledgerPath(ctx.env);
   const { ledger, warning } = loadLedger(file);
   if (warning) ctx.out(`提示：${warning}`);
@@ -99,6 +112,8 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
     adapters.some((adapter) => adapter.ownsPath(path, ctx.home, ctx.env)) || isKnowledgePath(path, ctx.env);
   const removed: LedgerEntry[] = [];
   const stripped: LedgerEntry[] = [];
+  /** 撤完区块后只剩空白的文件：留着但要被说出来，别让人以为已经清干净 */
+  const blankBlockFiles: string[] = [];
   const kept: Array<{ entry: LedgerEntry; reason: string }> = [];
 
   for (const entry of ledger.entries) {
@@ -156,8 +171,10 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
     }
 
     if (entry.resource === BLOCK_RESOURCE_KEY) {
-      // 区块文件（AGENTS.md 一类）是用户的：只撤掉我们那对标记及其正文，绝不删整个文件。
-      // 撤掉后所剩空白就说明这文件本来只为区块而存在，留成空文件即可。
+      // 区块文件（AGENTS.md 一类）是用户的：撤掉标记后标记外的内容一律保留，绝不删有内容的文件。
+      // 但如果撤完只剩空白，说明这文件本来只为我们的区块而存在（2026-10-13 Windows 真机
+      // 试验：全新成员机器上 uninstall 之后留下一个 0 字节的 .codex/AGENTS.md）。
+      // 这条删除只作用于 ledger 里记着的路径 —— 不在账上的文件仍按 §10 红线视为用户的，永不删。
       if (current === null) {
         kept.push({ entry, reason: '读取失败' });
         continue;
@@ -172,8 +189,23 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
         kept.push({ entry, reason: '本地已修改（区块被你改过，撤掉会丢你的内容）' });
         continue;
       }
+      const remainder = stripRegion(current, loc);
+      if (remainder.trim() === '') {
+        // 撤完只剩空白：这文件本来只为我们的区块而存在（2026-10-13 Windows 真机试验里
+        // 全新成员机器上留下过 0 字节的 .codex/AGENTS.md）。仍然不删 —— 区块文件住在
+        // `~/.codex/AGENTS.md` 这类工具原生路径上，我们分不清是不是工具自己要建的，
+        // 与「空目录只报告不删」同一条理由；但要把它说出来，别让人当成已经清干净了。
+        try {
+          replaceFileAtomic(entry.path, remainder);
+          stripped.push(entry);
+          blankBlockFiles.push(entry.path);
+        } catch (e) {
+          kept.push({ entry, reason: `写入失败：${e instanceof Error ? e.message : String(e)}` });
+        }
+        continue;
+      }
       try {
-        replaceFileAtomic(entry.path, stripRegion(current, loc));
+        replaceFileAtomic(entry.path, remainder);
         stripped.push(entry);
       } catch (e) {
         kept.push({ entry, reason: `写入失败：${e instanceof Error ? e.message : String(e)}` });
@@ -226,6 +258,9 @@ export async function uninstallCommand(ctx: CliContext, options: UninstallOption
       (stripped.length > 0 ? `；撤掉 ${stripped.length} 处团队区块（文件与你写在标记外的内容保留）` : ''),
   );
   for (const item of kept) ctx.out(`  保留 ${item.entry.path}（${item.entry.resource}：${item.reason}）`);
+  for (const path of blankBlockFiles) {
+    ctx.out(`  留下空白文件 ${path}（只为团队区块而存在，标记外没有你的内容；确认无用可自行删除）`);
+  }
   for (const root of emptyRoots) {
     ctx.out(`  留下空目录 ${root}（可能是我们建的，也可能本来就是工具的空目录；确认无用可自行删除）`);
   }

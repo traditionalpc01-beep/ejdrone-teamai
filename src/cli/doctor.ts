@@ -8,7 +8,7 @@ import { isKnowledgePath } from '../core/knowledge.js';
 import { activeNamespaces, resolve } from '../core/plan.js';
 import { hasHook, installedHookCommand } from '../hooks.js';
 import { findGitBash, isWindows, samePath, whichWithPathext } from '../platform.js';
-import { currentCliEntry, parseHookBash, parseHookPaths } from './constants.js';
+import { currentCliEntry, isDegradedHookCommand, parseHookBash, parseHookPaths, parseHookWrapper } from './constants.js';
 import { loadLedger } from '../core/ledger.js';
 import type { Config, Ledger } from '../core/types.js';
 import { configPath, knowledgeDir, ledgerPath } from '../state.js';
@@ -36,6 +36,25 @@ function probeUnverified(id: string): boolean {
   const probe = TOOL_PATHS[id]?.probe;
   if (!probe) return false;
   return /未核对|待真机|PROBE/.test(probe);
+}
+
+/**
+ * 工具配置里那条 hook 命令背后的「payload 正文」。
+ *
+ * POSIX：命令本身就是 payload，原样返回。
+ * Windows：命令只是 `<wrapper> EJDRONE_HOOK=1`，单引号形状在 wrapper 文件里，读出来才是 payload；
+ *          wrapper 缺失或读不动返回 null —— 调用方必须当成 FAIL 点名，不能降级成"没配 hook"，
+ *          因为条目确实在、每次开会话都会静默失败一次。
+ */
+function hookPayloadOf(cmd: string | null): string | null {
+  if (cmd === null) return null;
+  const wrapper = parseHookWrapper(cmd);
+  if (wrapper === null) return cmd;
+  try {
+    return readFileSync(wrapper, 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -310,15 +329,23 @@ export async function doctorCommand(
   ctx: CliContext,
   options: DoctorOptions,
   platform: NodeJS.Platform = process.platform,
+  /**
+   * win:gitbash 的 bash.exe 定位结果。默认按当前 env 现查；测试显式注入值，
+   * 这样「没装 Git for Windows」这条分支在装了 Git 的 Windows 真机上也能被测到
+   * （旧写法靠「macOS 上 reg 必然失败」来制造 null，在 Windows 上只会得到 PASS，
+   * 恰好把要验证的那条 FAIL 路径漏掉）。
+   */
+  gitBash: string | null = findGitBash(ctx.env, platform),
 ): Promise<number> {
   const checks: Check[] = [];
   const notes: string[] = [];
   /**
    * M10：win:hookbash 的采集桶 —— 每条「已安装 hook 的命令」一项
-   * （label = 工具名，bash = 命令里的 bash 段（POSIX 形态为 null），exists = 该文件是否存在）。
+   * （label = 工具名，bash = wrapper 正文里的 bash 段（POSIX 形态为 null），exists = 该文件是否存在，
+   *  degraded = 状态目录路径含空格、命令退成了 cmd.exe /c 包装形态）。
    * 只在 isWindows(platform) 时采集与输出；POSIX 下既不采集也不出现，--json 逐字节不变。
    */
-  const winHookBash: { label: string; bash: string | null; exists: boolean }[] = [];
+  const winHookBash: { label: string; bash: string | null; exists: boolean; degraded: boolean }[] = [];
   const add = (check: Check): void => {
     checks.push(check);
   };
@@ -458,12 +485,31 @@ export async function doctorCommand(
         // 光"条目在"不够：nvm 换版本、npm 全局升级换目录后，绝对路径会指向已消失的入口，
         // 自动 pull 就此断掉而没人知道。这里核对命令里的两个路径是否还活着。
         const cmd = installedHookCommand(target.path, target.event);
-        // M10：Windows 形态核对复用同一份命令（不重复读文件）；POSIX 不采集
-        if (isWindows(platform) && cmd !== null) {
-          const bash = parseHookBash(cmd);
-          winHookBash.push({ label: adapter.label, bash, exists: bash !== null && existsSync(bash) });
+        // Windows 形态下工具配置里只剩 `<wrapper> EJDRONE_HOOK=1`：单引号形状在 wrapper 正文里，
+        // 先把正文取出来，后面 node/cli/bash 三项核对就能沿用与 POSIX 完全相同的解析函数。
+        const payload = hookPayloadOf(cmd);
+        // M10：Windows 形态核对复用同一份正文（不重复读文件）；POSIX 不采集
+        if (isWindows(platform) && payload !== null && cmd !== null) {
+          const bash = parseHookBash(payload);
+          winHookBash.push({
+            label: adapter.label,
+            bash,
+            exists: bash !== null && existsSync(bash),
+            degraded: isDegradedHookCommand(cmd),
+          });
         }
-        const paths = cmd === null ? null : parseHookPaths(cmd);
+        if (cmd !== null && payload === null) {
+          // 命令指向的 wrapper 读不出来：hook 条目还在，但每次会话都会静默失败一次
+          const missing = parseHookWrapper(cmd);
+          add({
+            id: `hook:${id}`,
+            status: 'FAIL',
+            message: `${adapter.label} 的 hook 指向读不出来的 wrapper（${missing ?? cmd}），会话自动 pull 已失效`,
+            hint: '重跑 ejdrone init <repo> --force 以重新写入 hook wrapper',
+          });
+          continue;
+        }
+        const paths = payload === null ? null : parseHookPaths(payload);
         if (paths === null) {
           add({
             id: `hook:${id}`,
@@ -546,7 +592,6 @@ export async function doctorCommand(
   // 仅当 isWindows(platform) 为 true 时追加；POSIX 下这三条一条都不加，
   // --json 输出与现在逐字节一致（硬约束）。退出码规则不变：FAIL 计入 fails>0 ? 1 : 0。
   if (isWindows(platform)) {
-    const gitBash = findGitBash(ctx.env, platform);
     if (gitBash !== null) {
       add({ id: 'win:gitbash', status: 'PASS', message: `已找到 Git for Windows 的 bash.exe：${gitBash}` });
     } else {
@@ -578,6 +623,7 @@ export async function doctorCommand(
     if (winHookBash.length > 0) {
       const broken = winHookBash.filter((f) => f.bash !== null && !f.exists);
       const legacy = winHookBash.filter((f) => f.bash === null);
+      const degraded = winHookBash.filter((f) => f.bash !== null && f.exists && f.degraded);
       if (broken.length > 0) {
         add({
           id: 'win:hookbash',
@@ -591,6 +637,15 @@ export async function doctorCommand(
           status: 'WARN',
           message: `${legacy.length} 个工具的 hook 命令还是 POSIX 形态（没有 Git Bash 段），Windows 上跑不起来：${legacy.map((f) => f.label).join('、')}`,
           hint: '重跑 ejdrone init <repo> --force，把 hook 命令重写为 Git Bash 形态',
+        });
+      } else if (degraded.length > 0) {
+        // cmd.exe /c 包装形态是路径含空格时唯一能让 cmd 与 PowerShell 都跑起来的写法；
+        // 代价用 doctor 说清楚，不静默 —— 用 Git Bash 执行 hook 的工具在这台机器上不会自动 pull。
+        add({
+          id: 'win:hookbash',
+          status: 'WARN',
+          message: `${degraded.length} 个工具的 hook wrapper 路径含空格，已退到 cmd.exe /c 形态：${degraded.map((f) => f.label).join('、')}`,
+          hint: 'cmd.exe 与 PowerShell 侧正常；用 Git Bash 执行 hook 的工具不会自动 pull，需手动 ejdrone pull',
         });
       } else {
         add({

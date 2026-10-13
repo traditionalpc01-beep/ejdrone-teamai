@@ -1,36 +1,87 @@
 import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { findGitBash } from '../platform.js';
+import { findGitBash, type GitInstallPathReader } from '../platform.js';
+import { HOOK_COMMAND_MARKER } from '../hooks.js';
+import { hookWrapperPath } from '../state.js';
 
 /**
- * hook 里执行的命令：绝对路径的 node + cli 入口，而不是裸 `ejdrone`。
- * GUI 启动的 agent 常常不带 npm 全局 bin 的 PATH，裸命令会让"会话自动 pull"静默失效。
- * 前缀的 `EJDRONE_HOOK=1` 是 hooks.ts 识别自家条目的标记，删掉会导致 removeHook 认不出来。
+ * Windows 形态（M10 / T10.2，2026-10-12 真机实测后改定）：工具侧的命令是
+ * `<wrapper.cmd 正斜杠裸路径> EJDRONE_HOOK=1`，真正的 `"<git-bash>" -lc "…"` 收在 wrapper 里。
  *
- * Windows 形态（M10 / T10.2）：`"<git-bash>" -lc "EJDRONE_HOOK=1 '<node>' '<cli>' pull --silent"`。
- * 两个「为什么」钉在这里，改引号形状前先读：
- *  1. 内层必须保持单引号：hooks.ts 的 HOOK_COMMAND_MARKER 识别、parseHookPaths 的单引号提取、
- *     doctor 的绝对路径核对全都依赖 `EJDRONE_HOOK=1 '<node>' '<cli>' pull --silent` 这个形状，
- *     动内层引号 = 三处连锁改，不是局部改动。
- *  2. 外层用双引号是对计划文本的有意偏差：Git for Windows 的 bash 路径常含空格
- *     （C:\Program Files\Git\bin\bash.exe），cmd.exe 不认单引号包裹，双引号才是
- *     cmd 与 `bash -lc` 都友好的形态；单引号只在 bash 内部世界通用。
+ * 为什么必须这么改（实测矩阵见试验记录，六种启动方式 = node shell:true / cmd /c /
+ * cmd /d /s /c / powershell -Command / pwsh -Command / git bash -c）：
+ *  - `"<bash>" -lc "…"`：cmd 与 Git Bash 能跑，**PowerShell/pwsh 报 ParserError** ——
+ *    PowerShell 里「首 token 是带引号的路径」必须前置 `&`，而 `&` 在 cmd 与 bash 里是语法符号，
+ *    所以不存在一个既带引号首 token 又三 shell 通吃的命令串。
+ *  - 裸路径（不带引号）在 cmd / PowerShell / pwsh 里都是合法命令，于是把引号需求搬进 wrapper 文件；
+ *    代价是 wrapper 路径不能含空格，含空格时退到 `cmd.exe /c "<wrapper>"`（实测 PowerShell 通、
+ *    Git Bash 因 MSYS 把 `/c` 当路径转换而断），由 doctor 点名，不静默。
+ *  - 正斜杠：Git Bash 会把裸反斜杠路径里的 `\t`、`\e` 当转义吃掉（实测 `F:tmpejdrone…`），
+ *    而 cmd 与 PowerShell 都接受正斜杠，所以统一用正斜杠。
+ *  - `EJDRONE_HOOK=1` 作为尾随参数保留在命令串里：hooks.ts 靠 `.includes(marker)` 认领自家条目，
+ *    batch 会把它当 `%1` 忽略掉，识别链路一处都不用改。
  *
- * 返回 null 的唯一场景：win32 且找不到 Git for Windows（hook 装不了，调用方转人工指引）。
+ * 返回 null 的唯一场景：win32 且找不到 Git for Windows（wrapper 里没有可执行的宿主，hook 装不了）。
  */
 export function hookCommand(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
+  readRegistry?: GitInstallPathReader,
 ): string | null {
+  if (platform !== 'win32') return hookPayload(env);
+  const win = win32Hook(env, platform, readRegistry);
+  return win === null ? null : win.command;
+}
+
+/** hook payload 的正文形状：POSIX 直接就是它，Windows 把它写进 wrapper 文件。 */
+function hookPayload(env: NodeJS.ProcessEnv): string {
   const node = nonEmpty(env.EJDRONE_NODE) ?? process.execPath;
   const cli = nonEmpty(env.EJDRONE_CLI) ?? cliEntry();
-  const inner = `EJDRONE_HOOK=1 ${shellQuote(node)} ${shellQuote(cli)} pull --silent`;
-  if (platform !== 'win32') return inner;
-  const bash = findGitBash(env, platform);
-  if (bash === null) return null;
-  return `"${bash}" -lc "${inner}"`;
+  return `EJDRONE_HOOK=1 ${shellQuote(node)} ${shellQuote(cli)} pull --silent`;
 }
+
+/** Windows 下 hook 的两个产物：写进工具配置的命令串 + wrapper 文件正文。 */
+export interface Win32Hook {
+  command: string;
+  wrapperPath: string;
+  wrapperBody: string;
+  /** wrapper 路径含空格 → 走了 cmd.exe 包装，Git Bash 那一路会断，doctor 据此点名 */
+  degraded: boolean;
+}
+
+export function win32Hook(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  readRegistry?: GitInstallPathReader,
+): Win32Hook | null {
+  if (platform !== 'win32') return null;
+  const bash = findGitBash(env, platform, readRegistry);
+  if (bash === null) return null;
+  const body = `@echo off\r\n"${bash}" -lc "${hookPayload(env)}"\r\n`;
+  const wrapper = toForwardSlash(hookWrapperPath(env));
+  const degraded = wrapper.includes(' ');
+  const command = degraded ? `cmd.exe /c "${wrapper}" ${HOOK_COMMAND_MARKER}` : `${wrapper} ${HOOK_COMMAND_MARKER}`;
+  return { command, wrapperPath: hookWrapperPath(env), wrapperBody: body, degraded };
+}
+
+/** 工具配置里那条命令指向的 wrapper 路径；非 Windows 形态（没有 wrapper）返回 null。 */
+export function parseHookWrapper(cmd: string): string | null {
+  const bare = /^(\S+\.cmd) /i.exec(cmd)?.[1];
+  if (bare !== undefined) return bare;
+  const quoted = /cmd\.exe \/c "([^"]+)"/i.exec(cmd)?.[1];
+  return quoted === undefined ? null : quoted;
+}
+
+/** 这条 hook 命令是不是「路径含空格 → cmd.exe /c 包装」的降级形态。 */
+export function isDegradedHookCommand(cmd: string): boolean {
+  return /^cmd\.exe\s+\/c\s+"/i.test(cmd);
+}
+
+function toForwardSlash(p: string): string {
+  return p.split('\\').join('/');
+}
+
 
 function nonEmpty(value: string | undefined): string | null {
   const trimmed = (value ?? '').trim();
@@ -51,7 +102,14 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/** 从已安装的 hook 命令里取回 node 与 cli 入口两个绝对路径。 */
+/**
+ * 从 hook payload 正文里取回 node 与 cli 两个绝对路径。
+ *
+ * 取的是 payload 而不是工具配置里那一行命令：POSIX 下两者同一份，Windows 下命令只指向 wrapper，
+ * 单引号形状在 wrapper 正文里（调用方先用 parseHookWrapper 把正文读出来）。
+ * 绝对路径的 node + cli 入口而不是裸 `ejdrone`：GUI 启动的 agent 常常不带 npm 全局 bin 的 PATH，
+ * 裸命令会让「会话自动 pull」静默失效。
+ */
 export function parseHookPaths(cmd: string): { node: string; cli: string } | null {
   const quoted = [...cmd.matchAll(/'([^']*)'/g)].map((m) => m[1] ?? '');
   if (quoted.length < 2) return null;
@@ -59,7 +117,7 @@ export function parseHookPaths(cmd: string): { node: string; cli: string } | nul
 }
 
 /**
- * 从 hook 命令里提取 Windows 形态的 bash 路径（doctor 的 win:hookbash 检查用）。
+ * 从 hook payload 正文里提取 Windows 形态的 bash 路径（doctor 的 win:hookbash 检查用）。
  * 取第一个双引号段，非空且以 bash.exe 结尾（大小写不敏感）才认；
  * POSIX 形态没有双引号段 → null，双引号段不是 bash.exe（比如某工具自带的 wrapper）也 → null。
  */

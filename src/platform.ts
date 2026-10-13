@@ -30,7 +30,14 @@ export function isWindows(platform: NodeJS.Platform = process.platform): boolean
  * Git for Windows 时注册表无该键（非 0 退出码）、输出解析不出值——这些全是「没装」的
  * 正常形态，静默继续下一个候选即可；外抛会让上层整条链路崩掉。
  */
-export function findGitBash(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): string | null {
+/** 注册表读取器：抽出来是为了让「没有 Git for Windows」这条分支在任何主机上都可测。 */
+export type GitInstallPathReader = (env: NodeJS.ProcessEnv) => string | null;
+
+export function findGitBash(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+  readRegistry: GitInstallPathReader = gitInstallPathFromRegistry,
+): string | null {
   if (platform !== 'win32') return null; // 非 Windows：不碰 env、不跑 reg
   const candidates: string[] = [];
   for (const key of ['ProgramFiles', 'ProgramFiles(x86)']) {
@@ -44,7 +51,7 @@ export function findGitBash(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = 
   if (localAppData !== undefined && localAppData !== '') {
     candidates.push(join(localAppData, 'Programs', 'Git', 'bin', 'bash.exe'));
   }
-  const installPath = gitInstallPathFromRegistry(env);
+  const installPath = readRegistry(env);
   if (installPath !== null) candidates.push(join(installPath, 'bin', 'bash.exe'));
   for (const candidate of candidates) {
     if (isRegularFile(candidate)) return candidate;

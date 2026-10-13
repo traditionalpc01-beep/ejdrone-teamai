@@ -8,6 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { expectPrivateMode } from '../helpers/mode.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -106,8 +107,7 @@ describe('saveConfig / loadConfig', () => {
   it('creates the state directory and marks the file 0600', () => {
     saveConfig(base, env);
 
-    const mode = statSync(configPath(env)).mode & 0o777;
-    expect(mode).toBe(0o600);
+    expectPrivateMode(configPath(env), 0o600);
     expect(existsSync(join(home, '.ejdrone'))).toBe(true);
   });
 
@@ -126,7 +126,7 @@ describe('saveConfig / loadConfig', () => {
     saveConfig(updated, env);
 
     expect(loadConfig(env).config).toEqual(updated);
-    expect(statSync(configPath(env)).mode & 0o777).toBe(0o600);
+    expectPrivateMode(configPath(env), 0o600);
   });
 
   it('returns { config: null } with no error when the file does not exist', () => {

@@ -60,6 +60,21 @@ export function debugLogPath(env?: NodeJS.ProcessEnv): string {
 }
 
 /**
+ * Windows hook wrapper 的落点（M10 / T10.2）。
+ *
+ * 为什么 Windows 需要一个 wrapper 文件而不是把命令直接写进工具配置：
+ * 真机实测（`docs/trials/2026-10-13-windows-real-trial.md`）表明 `"<bash>" -lc "…"` 这种
+ * 首 token 为带引号可执行路径的形态，PowerShell 与 pwsh 会当成语法错误（它们要求 `&` 调用
+ * 操作符），而 cmd 又不认单引号 —— 一个命令串无法同时喂饱三种 shell。把带引号的 payload 收进
+ * wrapper 文件后，工具看到的只是一条不带引号的命令，六种启动方式实测全通。
+ *
+ * 与 POSIX 的 `~/.ejdrone` 同根，卸载时整并到自家目录里清理。
+ */
+export function hookWrapperPath(env?: NodeJS.ProcessEnv): string {
+  return join(stateDir(env), 'hooks', 'session-start.cmd');
+}
+
+/**
  * 团队知识镜像根目录（M8/M9）：`docs/` 与 `learnings/` 的投递落点，`ejdrone recall` 只读这里。
  *
  * 为什么不投进各工具目录（对标 teamai 也是镜像到单一本地目录、只被 recall 索引）：

@@ -16,6 +16,7 @@ import { applyPlan } from '../../src/core/apply.js';
 import { hashContent } from '../../src/core/ledger.js';
 import { hasHook, removeHook, upsertHook } from '../../src/hooks.js';
 import type { ApplyInput, Ledger, LedgerEntry, PlannedWrite } from '../../src/core/types.js';
+import { expectMode, expectPrivateMode } from '../helpers/mode.js';
 
 const START = '<!-- ejdrone:team-rules:start -->';
 const END = '<!-- ejdrone:team-rules:end -->';
@@ -348,7 +349,7 @@ describe('applyPlan: merge delivery (受管条目合并)', () => {
     // merge 条目的 hash 是"我们那几个键"的指纹，不是整文件哈希
     expect(entry.hash).not.toBe(hashContent(readFileSync(path, 'utf8')));
     // 成员权限不被打扰（本轮无已解析值入参）
-    expect(statSync(path).mode & 0o777).toBe(0o644);
+    expectMode(path, 0o644);
   });
 
   it('二次 apply：changed=false，一个字节都不写，ledger 条目不变', () => {
@@ -521,7 +522,7 @@ describe('applyPlan: merge delivery (受管条目合并)', () => {
     expect(after).toContain('[mcp_servers.team]\ncommand = "npx"');
     expect(after).toContain('[mcp_servers.team.env]\nTOKEN = "v"');
     expect(Object.keys(out.ledger.entries[0]?.managedKeys ?? {})).toEqual(['team']);
-    expect(statSync(path).mode & 0o777).toBe(0o600); // 原有权限保持
+    expectPrivateMode(path, 0o600); // 原有权限保持
 
     const out2 = applyPlan(makeInput({ writes: [w], activeResources: ['mcp:team'], ledger: out.ledger }));
     expect(out2.result.written).toEqual([]);
@@ -534,17 +535,17 @@ describe('applyPlan: merge delivery (受管条目合并)', () => {
     chmodSync(path, 0o644);
     const w = mergeJsonWrite(path, 'mcp:alpha', { alpha: '{"env":{"TOKEN":"s"}}' });
     applyPlan(makeInput({ writes: [w], activeResources: ['mcp:alpha'] }), { resolvedValuePaths: [path] });
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expectPrivateMode(path, 0o600);
 
     const fresh = join(home, 'fresh', '.claude.json');
     const w2 = mergeJsonWrite(fresh, 'mcp:alpha', { alpha: ALPHA });
     applyPlan(makeInput({ writes: [w2], activeResources: ['mcp:alpha'] }));
-    expect(statSync(fresh).mode & 0o777).toBe(0o600); // 规则 5：新建就收紧
+    expectPrivateMode(fresh, 0o600); // 规则 5：新建就收紧
 
     const plainPath = join(home, 'secret.md');
     const plain: PlannedWrite = { path: plainPath, content: 'has-resolved', resource: 'skills:p' };
     applyPlan(makeInput({ writes: [plain], activeResources: ['skills:p'] }), { resolvedValuePaths: [plainPath] });
-    expect(statSync(plainPath).mode & 0o777).toBe(0o600);
+    expectPrivateMode(plainPath, 0o600);
   });
 
   it('同一个 settings.json：先装 hook 再 merge mcp 条目，两条写路径互不破坏', () => {
@@ -569,7 +570,7 @@ describe('applyPlan: merge delivery (受管条目合并)', () => {
     expect(doc.mcpServers.GitHub).toEqual({ url: 'https://gh' }); // hook 写回没伤成员 mcp 键
     expect(doc.mcpServers.team).toEqual({ command: 'npx' });
     expect(doc.enabledPlugins).toEqual({ 'p-a': true });
-    expect(statSync(settings).mode & 0o777).toBe(0o600);
+    expectPrivateMode(settings, 0o600);
 
     const run2 = applyPlan(
       makeInput({ writes: [w], activeResources: ['mcp:team'], ledger: run1.ledger }),
@@ -593,7 +594,7 @@ describe('applyPlan: 含已解析值的 merge 投递必须收紧权限', () => {
   it('成员已有的 0644 文件被写入解析值 → 落成 0600', () => {
     const path = join(home, 'loose.json');
     seedFile(path, JSON.stringify({ mcpServers: { mine: { command: 'keep' } } }, null, 2) + '\n');
-    expect(statSync(path).mode & 0o777).toBe(0o644);
+    expectMode(path, 0o644);
 
     const w: PlannedWrite = {
       path,
@@ -607,7 +608,7 @@ describe('applyPlan: 含已解析值的 merge 投递必须收紧权限', () => {
       },
     };
     applyPlan(makeInput({ writes: [w], activeResources: ['mcp:claude-merge'] }));
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expectPrivateMode(path, 0o600);
     const doc = JSON.parse(readFileSync(path, 'utf8')) as { mcpServers: Record<string, unknown> };
     expect(doc.mcpServers.mine).toEqual({ command: 'keep' }); // 收紧权限不得动成员条目
   });
@@ -622,6 +623,6 @@ describe('applyPlan: 含已解析值的 merge 投递必须收紧权限', () => {
       merge: { format: 'json', pointer: ['mcpServers'], entries: { team: JSON.stringify({ command: 'npx' }) } },
     };
     applyPlan(makeInput({ writes: [w], activeResources: ['mcp:claude-merge'] }));
-    expect(statSync(path).mode & 0o777).toBe(0o644);
+    expectMode(path, 0o644);
   });
 });

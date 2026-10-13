@@ -7,7 +7,7 @@ import type { CliContext } from './context.js';
 import { requireConfig } from './config.js';
 import { submitMrChange } from './mr.js';
 import { openSnapshot } from './snapshot.js';
-import { teamReadme } from './team-readme.js';
+import { teamGitattributes, teamReadme } from './team-readme.js';
 
 export { teamReadme };
 
@@ -42,6 +42,12 @@ export async function readmeCommand(ctx: CliContext): Promise<number> {
   const files: Record<string, string> = {};
   if (!readmeExists || readFileSync(inRepo, 'utf8') !== text) files['README.md'] = text;
 
+  // 行尾约定跟着这份 MR 一起进仓库：Windows 成员默认 core.autocrlf=true，缺了它同一份团队
+  // 仓库在两种 OS 上检出不同字节，换机后全部投递内容会被判成「本地已修改」。
+  // 仓库里已有就不带 —— 团队可能定制过（比如加了自有二进制规则），覆盖等于绕过评审。
+  const gitattributesExists = existsSync(join(snapshot.dir, '.gitattributes'));
+  if (!gitattributesExists) files['.gitattributes'] = teamGitattributes();
+
   const skills = readBuiltinSkills();
   for (const note of skills.notes) ctx.out(`提示：${note}`);
   const addedSkills: string[] = [];
@@ -52,7 +58,7 @@ export async function readmeCommand(ctx: CliContext): Promise<number> {
   }
 
   if (Object.keys(files).length === 0) {
-    ctx.out('README.md 与内置技能都已是最新，无需提交');
+    ctx.out('README.md、内置技能与 .gitattributes 都已是最新，无需提交');
     return 0;
   }
 
@@ -62,6 +68,13 @@ export async function readmeCommand(ctx: CliContext): Promise<number> {
       readmeExists
         ? '重新生成 README.md（内容跟随当前仓库地址与默认分支）。'
         : '让新成员打开仓库首页就知道这是什么、怎么加入、怎么退出。',
+    );
+  }
+  if (files['.gitattributes'] !== undefined) {
+    body.push(
+      '加上 `.gitattributes`（`* text=auto eol=lf`）：Git for Windows 默认 `core.autocrlf=true`，',
+      '缺了它同一份团队仓库在 Windows 成员机器上检出是 CRLF、mac/Linux 是 LF，',
+      '成员换操作系统后所有投递内容会被判成「本地已修改」而收不到更新。',
     );
   }
   if (addedSkills.length > 0) {
@@ -79,7 +92,7 @@ export async function readmeCommand(ctx: CliContext): Promise<number> {
     branchPrefix: 'ejdrone/readme-',
     title:
       addedSkills.length > 0
-        ? 'docs: 补团队说明书与内置引导技能'
+        ? 'docs: 补团队说明书、内置引导技能与行尾约定'
         : readmeExists
           ? 'docs: 更新团队仓库说明书'
           : 'docs: 给团队仓库加一份说明书（README）',

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { BLOCK_END, BLOCK_START } from '../../src/agents/block.js';
@@ -341,3 +342,88 @@ describe('幂等', () => {
     expect(parseSummary(second.all)).toEqual({ written: 0, deleted: 0, kept: 0 });
   });
 });
+
+describe('MR 提交后的机器克隆状态（2026-10-13 Windows 真机试验引出）', () => {
+  // createBranch 会把 checkout 切到临时分支；不还原的话，紧接着的只读命令
+  // （status / list / contribute --dry-run）会把「还没合入的内容」当团队真相。
+  // 真机实测过一次：contribute 之后立刻 `contribute --dry-run` 因「目标路径已存在」被拒。
+  it('push 之后 checkout 仍停在默认分支，工作树里没有未合入内容', async () => {
+    const member = h.member('push-head-main');
+    await initMember(member, ['claude']);
+
+    member.write('.claude/skills/mine/SKILL.md', '# Mine\n\n我的技能。\n');
+    const pushed = await member.run(['push', '--skill', member.path('.claude', 'skills', 'mine'), '--ns', 'be']);
+    expect(pushed.code, pushed.all).toBe(0);
+
+    expect(headBranch(member)).toBe('main');
+    expect(member.exists('.ejdrone', 'repo', 'skills', 'be', 'mine', 'SKILL.md')).toBe(false);
+
+    // 未合入前，只读命令看到的必须仍是默认分支的真相
+    const dry = await member.run(['status']);
+    expect(dry.code, dry.all).toBe(0);
+    expect(dry.all).not.toContain('mine：be');
+  });
+
+  it('推上去的内容与仓库一致（无需再提交）时，checkout 也回到默认分支', async () => {
+    // submitMrChange 有两条不推送的提前返回：安全检查打回、isDirty=false。后者最容易在
+    // 「重复推同一份内容」时命中，是最常见的那次退出，也必须把 checkout 还回去。
+    const member = h.member('push-noop-restore');
+    await initMember(member, ['claude']);
+    member.write('.claude/skills/again/SKILL.md', '# Again\n\n推两次。\n');
+
+    const first = await member.run(['push', '--skill', member.path('.claude', 'skills', 'again'), '--ns', 'be']);
+    expect(first.code, first.all).toBe(0);
+    const branch = first.all.match(/ejdrone\/push-[^\s（）]+/)?.[0];
+    expect(branch, first.all).toBeTruthy();
+    h.mergeIntoMain(branch as string);
+
+    const second = await member.run(['push', '--skill', member.path('.claude', 'skills', 'again'), '--ns', 'be']);
+    expect(second.code, second.all).toBe(0);
+    expect(second.all).toContain('无需提交');
+    expect(headBranch(member)).toBe('main');
+    // 还原不能把已合入的内容从工作树里抹掉：下次 pull 还得能看到它
+    expect(member.exists('.ejdrone', 'repo', 'skills', 'be', 'again', 'SKILL.md')).toBe(true);
+  });
+});
+
+describe('uninstall 对区块文件的两种结局', () => {
+  // 标记外有成员的私有内容 → 文件保留、只撤区块（既有覆盖）；
+  // 文件本来就只为区块存在 → 撤完只剩空白，留着就是残留（真机：0 字节 .codex/AGENTS.md）。
+  it('AGENTS.md 只为区块而存在时，撤完只剩空白：不删，但必须被点名', async () => {
+    // 2026-10-13 Windows 真机试验：全新成员机器上 uninstall 之后留下一个 0 字节
+    // `.codex/AGENTS.md` 且没有任何提示，成员以为已经清干净了。
+    // 仍不删 —— 区块文件住在 `~/.codex/AGENTS.md` 这类工具原生路径上，分不清是不是工具自己要建的
+    // （与「空目录只报告不删」同一条理由），但要说出来。
+    const member = h.member('uninstall-blank-block');
+    await initMember(member, ['codex']);
+    expect(member.exists('.codex', 'AGENTS.md')).toBe(true);
+    expect(member.read('.codex', 'AGENTS.md')).toContain(BLOCK_START);
+
+    const out = await member.run(['uninstall', '--force']);
+    expect(out.code, out.all).toBe(0);
+    expect(out.all).toContain('留下空白文件');
+    expect(member.exists('.codex', 'AGENTS.md')).toBe(true);
+    expect(member.read('.codex', 'AGENTS.md').trim()).toBe('');
+  });
+
+  it('标记外有私有内容时，文件与标记外内容逐字节保留，也不报空白', async () => {
+    const member = h.member('uninstall-kept-block');
+    const personal = '# 我的私有说明\n\n别删我这行。\n\n';
+    member.write('.codex/AGENTS.md', personal);
+    await initMember(member, ['codex']);
+    expect(member.read('.codex', 'AGENTS.md')).toContain(BLOCK_START);
+
+    const out = await member.run(['uninstall', '--force']);
+    expect(out.code, out.all).toBe(0);
+    expect(member.read('.codex', 'AGENTS.md')).toBe(personal);
+    expect(out.all).not.toContain('留下空白文件');
+  });
+});
+
+/** checkout 当前停在哪个分支。 */
+function headBranch(member: Member): string {
+  return execFileSync('git', ['-C', member.path('.ejdrone', 'repo'), 'rev-parse', '--abbrev-ref', 'HEAD'], {
+    encoding: 'utf8',
+    env: member.env,
+  }).trim();
+}

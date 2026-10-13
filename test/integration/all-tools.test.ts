@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 
 import { BLOCK_END, BLOCK_START } from '../../src/agents/block.js';
 import { TOOL_PATHS } from '../../src/agents/paths.js';
+import { parseHookWrapper } from '../../src/cli/constants.js';
 import { ledgerPath } from '../../src/state.js';
 import { loadLedger } from '../../src/core/ledger.js';
 import { createHarness, installTools, seedTeamRepo, type Harness, type Member } from './helpers.js';
@@ -126,7 +128,13 @@ describe('16 工具全量投递', () => {
         .flat()
         .filter((entry) => (entry.hooks ?? []).some((h) => h.command?.includes('EJDRONE_HOOK=1')));
       expect(ours, `${id}: 应恰好一条自己的 hook`).toHaveLength(1);
-      expect(ours[0]?.hooks?.[0]?.command).toContain(`'${member.env.EJDRONE_CLI}' pull --silent`);
+      // Windows 形态下工具配置里只剩 `<wrapper> EJDRONE_HOOK=1`，带单引号的 node/cli 形状在
+      // wrapper 正文里（这是三 shell 通吃的代价，见 constants.ts 顶部实测矩阵）。
+      // 断言"这条 hook 指向的就是这个成员的 cli 入口"，POSIX 读命令、win32 读 wrapper，语义同一件事。
+      const command = ours[0]?.hooks?.[0]?.command ?? '';
+      const wrapper = parseHookWrapper(command);
+      const payload = wrapper === null ? command : readFileSync(wrapper.replace(/\//g, sep), 'utf8');
+      expect(payload).toContain(`'${member.env.EJDRONE_CLI}' pull --silent`);
     }
   });
 });

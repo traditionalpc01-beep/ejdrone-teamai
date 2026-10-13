@@ -119,7 +119,9 @@ describe('docs 镜像投递', () => {
     const pull = await member.run(['pull']);
     expect(pull.code, pull.all).toBe(1);
     expect(pull.all).toContain('本地已修改');
-    expect(pull.all).toContain('docs/deploy.md');
+    // 点名的是投递落点（绝对路径），Windows 上是反斜杠：断言前把斜杠归一，
+    // 断言的语义仍是「这条消息里出现了 docs/deploy.md 这个落点」。
+    expect(pull.all.split('\\').join('/')).toContain('docs/deploy.md');
 
     expect(member.read(...mirrorRel)).toContain('我自己加的笔记');
     expect(member.read(...mirrorRel)).not.toContain('团队改后的版本');
@@ -262,7 +264,9 @@ describe('doctor 的 knowledge:mirror', () => {
     const after = await member.run(['doctor', '--json']);
     const warn = (JSON.parse(after.out) as Doc).checks.find((c) => c.id === 'knowledge:mirror');
     expect(warn?.status, after.out).toBe('WARN');
-    expect(warn?.message).toContain('docs/deploy');
+    // 断言资源键而不是落点路径：键是 `docs:<kind 根以下相对路径>`，跨平台恒定；
+    // 括号里的绝对路径在 Windows 上是反斜杠，不该成为断言目标。
+    expect(warn?.message).toContain('docs:deploy');
     expect(warn?.hint).toContain('pull');
   });
 
