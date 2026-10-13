@@ -1,9 +1,60 @@
 # ejdrone-skills
 
-把团队的 AI skills / rules / MCP server 定义放进一个 Git 仓库，按**角色**裁剪后自动投递到每个成员的各种 AI 编程工具原生目录。
-一人调好的经验走 MR 评审合入，其他人下次开会话就自动有了 —— 不用通知、不用手动复制。
+把团队的 AI 技能、规范、MCP server、子 Agent 和团队文档放进一个 Git 仓库，按**角色**裁剪后自动投递到每个成员的
+AI 编程工具里。一人调好，走 MR 评审合入，其他人下次开会话就自动有了 —— 不用通知、不用手动复制。
 
-15-25 人规模、只有 user scope、不建服务端。设计取舍见 `docs/superpowers/specs/2026-10-11-ejdrone-skills-design.md`。
+## 它解决什么问题
+
+团队里每个人都在用 AI 编程工具（Claude Code、Cursor、Codex……），调好的技能、团队规范、MCP server
+都躺在各自的用户目录里：新人挨个要文件，规范改了没人知道，每个人的 AI 行为参差不齐。
+
+ejdrone-skills 让**一个团队 Git 仓库成为唯一真相**。能分发的东西有六类：
+
+| 类别 | 内容 | 到了成员机器上是什么 |
+|---|---|---|
+| skills | AI 技能 | 各工具的 skills 目录，AI 会话里直接可用 |
+| rules | 团队规范 | 各工具的 rules 载体（目录 / `.mdc` / `AGENTS.md` 区块） |
+| mcp | MCP server 声明 | 写进各工具自己的 MCP 配置文件，只动我们那几条 |
+| agents | 子 Agent 定义 | 按各工具的格式转换后投到 agents 目录 |
+| docs | 团队文档 | 镜像到 `~/.ejdrone/knowledge/`，`recall` 一条命令检索 |
+| learnings | 踩坑经验 | 同上；`contribute` 一条命令回流入库 |
+
+管理员按角色（全员 / 前端 / 运维……）组织上面的内容；成员 `ejdrone init` 一次之后**日常零操作** ——
+会话启动时 hook 自动 `pull`，你的角色该拿到的就位，不该拿的拿不到。
+
+边界同样重要：只有 user scope（不碰任何项目文件）、不建服务端、零遥测，网络只碰你们的团队仓库。
+
+## 适合谁 / 不适合谁
+
+- **适合**：15-25 人、Git 托管在内网或私有云（GitLab / GitHub）、愿意给全员仓库 write 权限、
+  希望一切变更经 MR 评审的团队。单人就能维护：一个 npm 包 + 一个 Git 仓库，没有服务端要值守。
+- **不适合**：需要 hooks / models / env 下发、teamwiki、dashboard、代码库知识图谱这类重能力的团队 ——
+  那是 teamai-cli 的领地，见下面的选型参考。
+
+设计取舍与理由见 `docs/superpowers/specs/2026-10-11-ejdrone-skills-design.md`。
+
+## 与 teamai-cli 的关系（选型参考）
+
+ejdrone-skills **不是** teamai-cli 的分叉。2.0 以腾讯开源的 teamai-cli 为对标做减法：
+17 个工具的落点表初稿从它的公开文档照抄并逐项标 PROBE，再逐个真机核实销记；
+个别语义（`recall --check` 的退出码约定、`mcp.yaml` 写坏时 MCP 整体停发）有意保持一致，方便两个产品之间迁移。
+
+下表差异按 2026-10-12 对 teamai-cli（commit `2cbf556`）的源码级复核记录，
+细粒度出处见 `docs/superpowers/plans/2026-10-11-ejdrone-skills-2.0.md` §7.1：
+
+| 维度 | ejdrone-skills 2.0 | teamai-cli |
+|---|---|---|
+| 支持工具 | 17 个（zcode 以无 hook 形态支持；omp、joycode 不收） | 19 个（多 omp、joycode） |
+| 资源类型 | 6 类（见上表） | 11 类（另含 env、hooks、models、codebase、teamwiki） |
+| 部署形态 | 纯 Git 仓库，无服务端、零遥测 | teamwiki / dashboard / votes / codebase 图谱等 beta 能力依赖本地服务与上报 |
+| 变更治理 | 一切入库变更走 MR 评审，**包括经验沉淀**（`contribute` → MR） | 经验沉淀走孤儿分支直推（不经 MR、不碰默认分支） |
+| 密钥管理 | MCP 的 `${VAR}` 只从环境变量解析，明文不进任何输出与日志 | env/secrets 子系统：仓库声明 key，成员 `teamai env set` 本地存值（0600） |
+| 知识检索 | 无索引轻量打分（标题×3 / 标签×2 / 正文×1），无状态、可迁移 | 持久索引（IDF 加权 + 投票 + 置信度晋升），为更大规模准备 |
+| 规模取向 | 15-25 人，单人维护得起 | 更大团队 |
+| 源码体量 | `src/` 74 文件 / 约 1.2 万行，测试代码与之约 1:1 | 单文件最大 222KB，复杂度主要来自 project scope 与 HTTP 后端 |
+
+一句话选型：要更全的资源类型、服务端周边能力和更大规模，选 teamai-cli；
+要最小依赖（一个 npm 包 + 一个 Git 仓库）、一切变更可评审、单人维护得起，选 ejdrone-skills。
 
 ## 装
 
@@ -12,23 +63,26 @@ npm install -g ejdrone-skills@2.0.0   # 内网 npm 源
 ejdrone --version
 ```
 
-2.0 以 **GA** 形态发（`2.0.0`）：六类资源（skills / rules / mcp / agents / docs / learnings）全部就位。
-验证状态：skills / rules / MCP 在 macOS 真机上走过投递与卸载还原；
-Windows 在 2026-10-13 上过真机，并且**往成员真在用的 `~/.claude` 做过一次完整 init→doctor→uninstall 与逐字节还原对账**
-（同文件的 `env` 自有键与 216 份自有 agent 全部原样），见 `docs/trials/2026-10-13-windows-real-trial.md`；
-子 Agent、团队知识、经验沉淀的验证是夹具逐字节对拍 + 真机行为级（hook 六种启动方式真跑、`recall` 中英文判读、`contribute` 全链路）。
-GA 前最后一项目视确认也已在真实 Claude Code 会话里完成：`/agents` 面板列出团队投下来的 agent，
-SessionStart hook 在真实 claude 进程里触发并自动拉新（试验记录 §9，含 216 份自有 agent 的还原对账）。
+2.0.0 为 **GA**：六类资源（skills / rules / mcp / agents / docs / learnings）全部就位。验证口径：
+
+- **macOS 真机**：skills / rules / MCP 走过投递与卸载还原。
+- **Windows 10 真机**（2026-10-13）：全量测试真机全绿——试验时点 53 文件 / 881 例，zcode 适配器并入后
+  54 文件 / 915 例；`init → pull → hook 自动 pull → doctor → uninstall` 全流程跑通，并对成员
+  **真在用的 `~/.claude`** 做过一次完整投递与逐字节还原对账（同文件 `env` 自有键与 216 份自有 agent
+  全部原样），见 `docs/trials/2026-10-13-windows-real-trial.md`。
+- **子 Agent / 团队知识 / 经验沉淀**：夹具逐字节对拍 + 真机行为级（hook 六种启动方式真跑、`recall`
+  中英文判读、`contribute` 全链路）；GA 前最后一项目视确认在真实 Claude Code 会话完成——
+  `/agents` 面板列出团队投下来的 agent，SessionStart hook 触发并自动拉新（试验记录 §9）。
 
 前置：Node.js ≥ 20、git。Windows 另需 Git for Windows（hook 走它的 bash.exe 绝对路径）。
 
 ## 管理员：建团队仓库
 
-在 Git 托管上建一个空仓库（建议 `ejdrone-teamai`），给全员 write 权限，然后：
+在 Git 托管上建一个空仓库（建议 `ejdrone-team`），给全员 write 权限，然后：
 
 ```bash
 cd /path/to/your-project
-ejdrone init https://gitlab.example.com/team/ejdrone-teamai.git
+ejdrone init https://gitlab.example.com/team/ejdrone-team.git
 ejdrone doctor          # 逐项体检，全绿才算好
 ```
 
@@ -61,7 +115,7 @@ ejdrone roles add fe --namespaces fe -d "前端"
 ## 成员：加入（3 分钟）
 
 ```bash
-ejdrone init https://gitlab.example.com/team/ejdrone-teamai.git
+ejdrone init https://gitlab.example.com/team/ejdrone-team.git
 # 交互里勾选你在用的工具、选你的角色
 ejdrone list           # 看拿到了什么
 ```
@@ -77,7 +131,7 @@ ejdrone init <repo> --agent qoder-cn,claude --role devops --force
 自建 GitLab 域名里不含 `gitlab` 时显式指定 provider，否则只能手动开 MR：
 
 ```bash
-ejdrone init https://code.example.com/team/ejdrone-teamai.git --provider gitlab
+ejdrone init https://code.example.com/team/ejdrone-team.git --provider gitlab
 ```
 
 ## 日常：分享一条 skill 给团队
@@ -245,8 +299,6 @@ ejdrone contribute --file ./notes.md --dry-run  # 只看会写成什么样，一
 | DeepSeek Harness | `~/.dsh/skills/`（或 `$DSH_HOME`） | `~/.dsh/AGENTS.md` 团队区块 | — | — | 未核（本机未装） |
 | ZCode | `~/.zcode/skills/` | — | — | `~/.zcode/agents/*.md` | 已核（2026-10-13 Windows 真机：会话可用技能列表逐条列出 `~/.zcode/skills` 内容，自有 `codingagent.md` 的 name/description 出现在可用 agent 类型里；无公开的用户级 hook/MCP 载点，`~/.zcode/v2/*` 是内部应用状态不碰） |
 
-`—` = 该工具没有可写的 markdown rules 载体，团队规范不下发给它（宁可少投递，也不往它不读的位置硬写）。
-
 `—` = 该工具没有对应的用户级载体：`rules` 列的 `—` 表示团队规范不下发给它，`MCP 落点` 列的 `—` 表示 `mcp/` 里的 server 不下发给它（宁可少投递，也不往它不读的位置硬写文件）。
 
 **未核对的落点**由 `ejdrone doctor` 点名 —— 只报你在 `init` 里勾选的工具，没勾的折成一行提示，不刷屏。
@@ -254,8 +306,9 @@ ejdrone contribute --file ./notes.md --dry-run  # 只看会写成什么样，一
 
 ## Windows
 
-**已在 Windows 10 真机上验证**（2026-10-13：全量测试 53 文件 / 881 例绿，`init → pull → hook 自动 pull →
-doctor → uninstall` 全流程跑通，逐字节还原对账见 `docs/trials/2026-10-13-windows-real-trial.md`）。
+**已在 Windows 10 真机上验证**（2026-10-13：全量测试真机全绿，试验时点 53 文件 / 881 例、
+zcode 适配器并入后 54 文件 / 915 例；`init → pull → hook 自动 pull → doctor → uninstall`
+全流程跑通，逐字节还原对账见 `docs/trials/2026-10-13-windows-real-trial.md`）。
 前置是 **Git for Windows**（https://git-scm.com/download/win）：Node ≥ 20 与 Git for Windows 装上即可，
 其余与 macOS/Linux 相同。
 
@@ -281,7 +334,7 @@ doctor → uninstall` 全流程跑通，逐字节还原对账见 `docs/trials/20
 
 ## 为什么 rules 有四种投递方式
 
-各工具读取团队规范的位置完全不同，16 个工具里分了四种：
+各工具读取团队规范的位置完全不同，17 个工具里分了四种：
 
 - **rulesdir**（Claude / Qoder CN / Qoder / Trae / Trae CN）：工具的 rules 目录，逐文件、原文照抄
 - **mdc**（Cursor）：`.mdc` 格式，需要重写 frontmatter（`description` / `globs` / `alwaysApply`）
