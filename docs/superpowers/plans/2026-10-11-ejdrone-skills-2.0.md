@@ -543,6 +543,28 @@ M10 的资源前置到位后第一次在 Windows 真机上跑，下列结论**�
 | `submitMrChange` 的 checkout 归属 | 未规定 | 用 `finally` 在任何退出路径把机器克隆还给默认分支（空仓库那一路本就在 targetBranch，不还原） | `createBranch` 切到临时分支而 `fetchReset` 只 `reset --hard` 不改 HEAD；实测 `contribute` 后紧接 `contribute --dry-run` 因「目标路径已存在」被拒 —— 只读命令把未合入内容当团队真相 |
 | uninstall 遇到「撤完区块只剩空白」的文件 | 「留成空文件即可」 | **仍然不删**，但新增一行 `留下空白文件 …` 点名 | 真机留下过 0 字节 `.codex/AGENTS.md` 且零提示，成员以为已清干净。不删的理由与同文件「空目录只报告不删」一致（`~/.codex/AGENTS.md` 是工具原生路径，分不清谁建的），且既有钉子用例 `failure.test.ts` 明确钉着「区块文件绝不整文件删除」——尊重它而不是推翻 |
 
+## 9. 2.0 完成度审计（2026-10-13 定版 `v2.0.0-preview.1` 前逐条核对）
+
+对照 §2「做」表的六项验收形态，逐项给出**证据出处**而不是结论。六项全部达成；
+唯一的目视项已推进到真实成员配置，剩一步人工确认（见最后一列）。
+
+| # | §2 验收形态 | 实际达成 | 证据 |
+|---|---|---|---|
+| 1 | `paths.ts` 16 行表项；每工具 skills/rules 落点、hook 落点；doctor 逐项可查 | 达成 | `test/agents/suite.test.ts` 144 例公共六项 × 16 工具、`test/integration/all-tools.test.ts` 16 工具一次性 init+pull 并断言「账本里没有一个路径落在 16 个工具根之外」；macOS 与 Windows 双端绿 |
+| 2 | `mcp/mcp.yaml` → 各工具原生 MCP 配置，受管条目合并不动用户条目 | 达成 | §3.3 六条规则逐条单测（`test/core/apply.test.ts` 34 例、`test/core/merge.test.ts` 26 例）；Windows 真机把 stdio+http（带 `${VAR}`）投进**成员真用的** `.claude.json`/`config.toml`/`settings.json`，自有条目保留、卸载后三文件逐字节还原（`docs/trials/2026-10-13-windows-real-trial.md` §4/§7.6） |
+| 3 | `agents/` → 各工具原生 agents 目录，按工具转换格式 | 达成 | `test/agents/agentfmt.test.ts` 17 例四形态 + 往返不丢字段；真机内容级核对：claude 收 `.md`、codex 收 `.toml` 且确实没有 tools 键、ns agent 只给订阅角色（§7.6 还证明投进 216 份自有 agent 的目录时一字节没动别人的）。**唯一未做**：会话里 `/agents` 的目视确认 |
+| 4 | `docs/` 镜像 + `ejdrone recall` 可检索 | 达成 | `test/integration/knowledge.test.ts` 15 例（含「停用 ns 后那份镜像被删除」哨兵）；真机 5 组中英文 query 人工判读，`rebalance partition` 得 score=1 → 正确判 `NOT_RELEVANT`（退出码 1），中文标题/正文命中正常 |
+| 5 | `learnings/` + `contribute`（走 MR）+ recall 可检索 | 达成 | `test/integration/learnings.test.ts` 7 例；真机全链路：写 learning → `contribute` 推分支 → 模拟评审合入 → **第二个成员** pull → 镜像出现 → `recall --check` 得 `RELEVANT score=13`；`--dry-run` 远端分支集合与 main sha 逐字不变 |
+| 6 | Windows 真机 init → pull → hook 自动 pull → doctor 全绿；e2e 在 Windows 跑通 | 达成 | `npm test` 在 Windows 10 真机 53 文件 / 893 例全绿；doctor `win:gitbash`/`win:git`/`win:hookbash` 三条全 PASS；hook 命令被 cmd×3 / PowerShell / pwsh / Git Bash **六种启动方式真实执行**并自动拉回新推的 skill；per-user Git 形态与 `npm install -g` 垫片形态各自真机销记（§7.1/§7.2） |
+
+§5 全局门槛逐条：① typecheck 0 错误 + 全量测试绿（非只跑新增文件）✅；② 契约变更只发生在各里程碑的前置任务 ✅；
+③ 终审对照 §2 —— 本轮把执行期"看着像超集"的东西按 §7 逐条登记而非默默保留 ✅；
+④ 真机试验记录归档 + 逐字节还原（这次连真实成员配置都做了还原对账）✅；⑤ 每个里程碑合入后更新 §7 与 README ✅。
+
+未关掉的两项与它们的性质：真实会话内的目视确认（**环境阻塞**：模型出口指向未运行的本地代理，
+headless 零输出；两分钟人工步骤见试验记录 §7.6）、HKCU-only 的 Git 注册表形态（**要改系统注册表才能造**，
+注入式单测覆盖）。都不属代码缺口，因此本版按 preview 发：GA 前把目视那一步做掉即可。
+
 ## 附：证据清单（2026-10-11 核对）
 
 - 仓库：`https://github.com/Tencent/teamai-cli`（commit `2cbf556`，5282 stars，TypeScript）
