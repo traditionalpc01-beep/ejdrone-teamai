@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { sep as SEP } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { BLOCK_END, BLOCK_START } from '../../src/agents/block.js';
@@ -427,3 +429,81 @@ function headBranch(member: Member): string {
     env: member.env,
   }).trim();
 }
+
+/**
+ * M10 / T10.2 的 Windows 专属产物：hook wrapper。
+ *
+ * 只在 win32 主机上跑（POSIX 上 `win32Hook()` 恒为 null，这条路根本不会执行）——
+ * 这一层的代码此前只有单元测试从旁边描述它，没有一条用例真的把 wrapper 文件写出来过。
+ */
+describe.runIf(process.platform === 'win32')('Windows hook wrapper（init 落盘 / 降级 / 写失败 / 卸载）', () => {
+  it('init 把 bash -lc 的 payload 写进 wrapper，工具配置里只留指向它的裸路径', async () => {
+    const member = h.member('win-wrapper-init');
+    installTools(member, ['claude']);
+    const init = await member.run(['init', h.origin, '--agent', 'claude', '--role', 'be']);
+    expect(init.code, init.all).toBe(0);
+
+    const wrapper = member.read('.ejdrone', 'hooks', 'session-start.cmd');
+    expect(wrapper).toMatch(/^@echo off\r\n/);
+    expect(wrapper).toContain('-lc "EJDRONE_HOOK=1');
+    expect(wrapper).toContain(`'${member.env.EJDRONE_CLI}' pull --silent`);
+
+    const settings = JSON.parse(member.read('.claude', 'settings.json')) as {
+      hooks: { SessionStart: Array<{ hooks: Array<{ command: string }> }> };
+    };
+    const command = settings.hooks.SessionStart[0]?.hooks[0]?.command ?? '';
+    // 命令串里既没有引号包住的可执行路径、也没有 bash 段：那是 PowerShell 能跑起来的前提
+      expect(command.split('/').join(SEP)).toBe(member.path('.ejdrone', 'hooks', 'session-start.cmd') + ' EJDRONE_HOOK=1');
+    expect(command).not.toContain('-lc');
+
+    const doctor = await member.run(['doctor', '--json']);
+    expect(doctor.code, doctor.out).toBe(0);
+  });
+
+  it('状态目录路径含空格 → 退到 cmd.exe /c 包装并当场说出来，doctor 报 WARN', async () => {
+    // 用户名带空格是 Windows 上的常见形态；唯一能同时喂饱 cmd 与 PowerShell 的写法
+    // 会牺牲 Git Bash 那一路，所以必须可见，不能静默降级。
+    const member = h.member('win wrapper spaced');
+    installTools(member, ['claude']);
+    const init = await member.run(['init', h.origin, '--agent', 'claude', '--role', 'be']);
+    expect(init.code, init.all).toBe(0);
+    expect(init.all).toContain('退到 cmd.exe /c');
+
+    const settings = JSON.parse(member.read('.claude', 'settings.json')) as {
+      hooks: { SessionStart: Array<{ hooks: Array<{ command: string }> }> };
+    };
+    expect(settings.hooks.SessionStart[0]?.hooks[0]?.command ?? '').toContain('cmd.exe /c "');
+
+    const doctor = await member.run(['doctor', '--json']);
+    const report = JSON.parse(doctor.out) as { checks: Array<{ id: string; status: string; message: string }> };
+    const bash = report.checks.find((c) => c.id === 'win:hookbash');
+    expect(bash?.status, doctor.out).toBe('WARN');
+    expect(bash?.message ?? '').toContain('含空格');
+  });
+
+  it('wrapper 写不出来时不装 hook，并给出「手动 pull 不受影响」的下一步', async () => {
+    const member = h.member('win-wrapper-write-fail');
+    installTools(member, ['claude']);
+    // 把 hooks 那一层占成一个普通文件：mkdirSync 必然失败
+    mkdirSync(member.path('.ejdrone'), { recursive: true });
+    writeFileSync(member.path('.ejdrone', 'hooks'), 'not a directory\n', 'utf8');
+
+    const init = await member.run(['init', h.origin, '--agent', 'claude', '--role', 'be']);
+    expect(init.code, init.all).toBe(0);
+    expect(init.all).toContain('hook wrapper 写不出来');
+    expect(init.all).toContain('手动 ejdrone pull');
+    expect(member.exists('.claude', 'settings.json')).toBe(false);
+  });
+
+  it('uninstall 删掉 wrapper 文件', async () => {
+    const member = h.member('win-wrapper-uninstall');
+    installTools(member, ['claude']);
+    expect((await member.run(['init', h.origin, '--agent', 'claude', '--role', 'be'])).code).toBe(0);
+    expect(member.exists('.ejdrone', 'hooks', 'session-start.cmd')).toBe(true);
+
+    const out = await member.run(['uninstall', '--force']);
+    expect(out.code, out.all).toBe(0);
+    expect(out.all).toContain('hook wrapper');
+    expect(member.exists('.ejdrone', 'hooks', 'session-start.cmd')).toBe(false);
+  });
+});

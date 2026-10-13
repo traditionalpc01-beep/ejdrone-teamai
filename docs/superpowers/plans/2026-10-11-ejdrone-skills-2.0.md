@@ -315,7 +315,7 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 - [x] **T7.6 doctor**：agents 落点逐项可查（有落点但目录不存在 = WARN；停发 = FAIL 点名）。
 - [x] **T7.7 门槛**：typecheck + 全量测试绿；端到端：根 agent + ns agent → 成员 pull → claude（md）与 codex（toml）
   落点内容正确 → 切角色后 ns agent 移除、根 agent 保留 → 二次 pull 幂等。
-- [ ] **T7.8 真机（部分完成，2026-10-13）**：agent 投递到真实 Windows 成员目录后的**内容级**核对已过（claude 收到 `kafka-ops.md`、codex 收到 `kafka-ops.toml` 且确实没有 tools 键、ns agent 只给订阅者）；仍欠「打开真实 Claude Code 会话确认 `/agents` 把它列出来」—— 按裁定本轮不往成员真实配置目录写入。证据见 `docs/trials/2026-10-13-windows-real-trial.md` §1/§7。
+- [ ] **T7.8 真机（部分完成，2026-10-13）**：agent 投递到真实 Windows 成员目录后的**内容级**核对已过（claude 收到 `kafka-ops.md`、codex 收到 `kafka-ops.toml` 且确实没有 tools 键、ns agent 只给订阅者）；仍欠「打开真实 Claude Code 会话确认 `/agents` 把它列出来」—— 试了 headless `claude -p` 与 `--include-hook-events`，本机 150s 内零输出（退出码 124），登记为环境阻塞。证据见 `docs/trials/2026-10-13-windows-real-trial.md` §4 与 §7.3。
   试验记录 + 逐字节还原。
 
 **回滚**：删 `agents/` 目录（MR），pull 后移除。
@@ -426,7 +426,7 @@ hookEvents?: string[];        // 该工具支持的 hook 事件全集（1.0 只�
 - [x] **T10.5 doctor Windows 检查项**：Git Bash 存在性（FAIL + 安装指引）、hook 命令指向的 bash 路径存在、
   `git` 在 PATH。
 - [x] **T10.6 文档**：README 去掉「Windows 未支持」，加「Windows 前置：Git for Windows」；AGENTS.md 同步改。
-- [ ] **T10.7 真机（主体完成，2026-10-13）**：Windows 真机 init → pull → doctor 全绿 → uninstall → 逐字节还原全部执行；「重开真实 agent 会话」换成**把安装好的那条 hook 命令真交给六种启动方式跑**，判据从日志增长改成行为（推一条新 skill，hook 跑完它自己回到成员目录）—— 六路全通。剩下的真实会话确认与 `/agents` 同因，登记为遗留。见 `docs/trials/2026-10-13-windows-real-trial.md` §3/§4/§7。
+- [ ] **T10.7 真机（主体完成，2026-10-13）**：Windows 真机 init → pull → doctor 全绿 → uninstall → 逐字节还原全部执行；「重开真实 agent 会话」换成**把安装好的那条 hook 命令真交给六种启动方式跑**，判据从日志增长改成行为（推一条新 skill，hook 跑完它自己回到成员目录）—— 六路全通。剩下的真实会话确认与 `/agents` 同因，登记为环境阻塞（headless `claude -p` 本机零输出）。见 `docs/trials/2026-10-13-windows-real-trial.md` §3/§4/§7.3。
   试验记录 + 逐字节还原（Windows 侧同样按备份还原）。
 
 **回滚**：文档级回退（重新标注不支持）；代码层 platform 分支对 POSIX 无影响。

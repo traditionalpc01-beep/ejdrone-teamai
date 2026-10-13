@@ -146,19 +146,87 @@ uninstall --force → 退出码 0，删 21 个投递文件 + 撤 4 处团队区�
 | T10.2「hook 命令形态外层双引号、内层单引号」 | `"<gitbash>" -lc "…"` | 命令改为指向 wrapper；内层单引号形状原样保留在 wrapper 正文里 | 实测矩阵 F 行：旧形态在 PowerShell/pwsh 下 ParserError。AGENTS.md 担心的三处依赖（marker、`parseHookPaths`、doctor 核对）全部保住 |
 | T10.2「找不到 Git Bash → installed:false」 | 不变 | 不变；另外路径含空格时降级为 `cmd.exe /c` 包装 + doctor WARN | 含空格时没有既通吃又无需 `cmd.exe` 的写法 |
 | §4「真机试验…结束后按备份逐字节还原本机」 | 在成员真机上做并还原 | 在**伪造 HOME** 内做，真实 `~/.claude`、`~/.qoder-cn`、`~/.codex` 一个字节都没动 | 用户裁定的验证深度；`~/.qoder-cn` 是进行中的会话自己在用的配置目录 |
-| T5.7/T6.8「开工具确认 agent 可见 / MCP 出现」 | 打开真实工具会话核对 | 未做（同上一条），改为：投递产物内容级逐字节核对 + hook 命令真跑并验证行为 | 内容级可见性（`/agents` 列出、Qoder 会话里 hook 触发）仍登记为遗留项，见 §7 |
+| T5.7/T6.8「开工具确认 agent 可见 / MCP 出现」 | 打开真实工具会话核对 | 未做（同上一条），改为：投递产物内容级逐字节核对 + hook 命令真跑并验证行为 | 内容级可见性（`/agents` 列出、Qoder 会话里 hook 触发）仍登记为遗留项，见 §7.3 |
 
-## 7. 仍然遗留
+## 7. 遗留项处置结果（2026-10-13 补跑）
 
-1. **真实工具会话内的可见性**：打开 Claude Code 的 `/agents` 确认它列出投出去的 agent、开一次真实
-   Qoder CN 会话确认 SessionStart hook 被触发。需要一次允许写入真实配置目录的窗口。
-2. **非管理员 Git 安装形态**（`%LOCALAPPDATA%\Programs\Git` + 仅 `HKCU` 注册表）：本机是 D 盘 + HKLM，
-   该形态只有注入式单测覆盖（`test/platform.test.ts` 的 LOCALAPPDATA 用例）。
-3. **Windows 上的 npm 全局安装链路**（`npm install -g` 后 `EJDRONE_CLI` 指向 `%APPDATA%\npm` 下的
-   `.cmd` 垫片而非 `cli.js`）：本轮用 `dist/cli.js` 直跑，垫片形态未验。
-4. P3 观察池不变（ledgerEntry Map 索引、probe 显式化、debug.log 轮换、doctor.ts 拆分）。
+原 §7 四条，现在三条关闭、一条环境阻塞：
 
-## 8. 回滚
+### 7.1 已关闭：非管理员 Git for Windows 形态（`%LOCALAPPDATA%\Programs\Git`）
+
+真机验证，不再是只有注入式单测：在 `%TEMP%` 下造 `LocalAppData\Programs\Git\bin\bash.exe`，
+用 `LOCALAPPDATA` 指向它、`ProgramFiles` 指向空目录跑真代码 ——
+
+```
+findGitBash(LOCALAPPDATA 形态) = ...\LocalAppData\Programs\Git\bin\bash.exe
+LOCALAPPDATA 优先级高于注册表   = true      ← 非管理员安装不会被 HKLM 抢走
+win32Hook() 的 wrapper 正文含 per-user bash = true
+win32Hook() 的 command = <state>/hooks/session-start.cmd EJDRONE_HOOK=1, degraded=false
+LOCALAPPDATA 缺失且注册表也没有 → findGitBash=null、hookCommand=null → init 降级不装 hook
+```
+
+只有「HKCU 有值而 HKLM 没有」这一子形态仍未真机验证：本机 HKLM 装了 Git，
+要造出那台机器形态得改系统注册表，不在试验里动系统配置。该分支由 `test/platform.test.ts`
+的注入用例覆盖（HKLM→HKCU 顺序、`reg` 失败静默继续）。
+
+### 7.2 已关闭：Windows 上的 npm 全局安装（`.cmd` 垫片形态）
+
+`npm pack` → `npm install -g ./ejdrone-skills-2.0.0-preview.0.tgz` → **全部用全局 `ejdrone` 命令**
+（不是 `node dist/cli.js`）在隔离 HOME 上跑完整生命周期，验完 `npm uninstall -g` 还原：
+
+```
+全局 bin：ejdrone / ejdrone.cmd / ejdrone.ps1 三件都在；ejdrone --version = 2.0.0-preview.0
+init → 退出码 0，hook 已装
+wrapper 正文里的 cli = C:\Users\ej\AppData\Roaming\npm\node_modules\ejdrone-skills\dist\cli.js
+  真实存在 = true ；指向 .js 而不是 .cmd 垫片 = true   ← 关键：hook 不会去 exec 一个批处理
+doctor --json → {"pass":15,"warn":1,"fail":0} 退出码 0；hook:claude / win:hookbash / win:gitbash 全 PASS
+用这条安装形态的 hook 命令真跑自动 pull：cmd /c YES、powershell YES、git bash YES
+uninstall --force → 退出码 0，wrapper 已删，投递文件与记账清干净
+```
+
+结论：成员按 README 的方式装（`npm install -g`）时整条链路成立，`realpathSync(argv[1])`
+在 npm 垫片下解析到的仍是真实 `dist/cli.js`。
+
+### 7.3 未关闭（环境阻塞）：真实工具会话内的可见性
+
+试了两种不碰成员真实配置的做法：`claude -p … --output-format json`（headless）以及
+带 `--include-hook-events` 的 stream-json 会话 —— **本机 headless Claude 在 150s 内零输出、退出码 124**，
+拿不到任何可读回的数据（很可能是这套 Claude Code 在非交互上下文里等授权/信任确认）。
+`codex` 同理未通。因此 T7.8 的「打开 `/agents` 看它真列出投出去的 agent」与
+「开一次真实会话确认 SessionStart 触发」这两条**仍未在真实会话里目视确认**。
+
+已经拿到的等价证据（不是同一件事，但覆盖了风险面）：
+- 工具配置里那条 hook 命令被**真实执行**且完成了自动 pull（六种启动方式，见 §3），
+  所以「命令形态能不能跑起来」这一层是行为级证明，不是推断；
+- 投递产物是**内容级**逐字节核对的：claude 收到 `kafka-ops.md`（frontmatter `name/description/tools/model` 齐全）、
+  codex 收到 `kafka-ops.toml` 且确实没有 tools 键（见 §4）。
+仍欠的是工具自己那一侧的解析与展示（它是否认这份 frontmatter、`/agents` 里是否出现），
+需要一个能交互操作 Claude Code / Qoder CN 的窗口，或一个可用 headless 凭据的账号。
+
+诚实起见补一句方法学纠正：第一次判「hook 有没有触发」我用的是 `debug.log` 是否增长，
+四路全 `no`，看起来像「装了但不干活」；实际是一次干净的 `pull --silent` 本来就不写日志。
+判据换成外部可见行为（推一条新 skill、删掉成员那份、看它是否自己回来）之后六路全通。
+**这条误判值得留给下一个做真机试验的人**：silent 路径的成功没有日志，不能用日志存在性当证据。
+
+### 7.4 本轮新增的覆盖（Windows 专属代码路径）
+
+`test/integration/lifecycle.test.ts` 新增 4 条 `runIf(win32)` 用例，把此前只有单元测从旁边
+描述过、从未真被执行的那层代码钉住：wrapper 真的落盘且 payload 形状不变、工具配置里只留裸路径、
+路径含空格时的 `cmd.exe /c` 降级 + doctor `win:hookbash` WARN、wrapper 写失败时不装 hook
+并给出「手动 pull 不受影响」、uninstall 删除 wrapper。
+
+全仓覆盖率（临时 `--no-save` 装 `@vitest/coverage-v8`，不改依赖）：
+**语句 88.99%、分支 82.7%、函数 98.48%**。低的是 `context.ts` 46.91%（交互 prompt 默认实现，
+测试注入 `prompt/confirm/choose` 后不会走到）与 `roles.ts` 60%、`agentscollect.ts` 62%
+（交互式多选），属设计内不可测面，不是漏测；`src/core` 与 `src/agents` 基本 100%。
+
+## 8. 仍然遗留
+
+1. 真实工具会话内的目视确认（§7.3）。
+2. HKCU-only 的 Git 注册表形态（§7.1，要动系统注册表才能造）。
+3. P3 观察池不变（ledgerEntry Map 索引、probe 显式化、debug.log 轮换、doctor.ts 拆分）。
+
+## 9. 回滚
 
 代码层：本轮改动都在 `release/2.0-preview` 上、尚未推送；回滚 = revert 对应提交。
 hook 形态单独可回退：把 `win32Hook()` 的 `command` 改回 `"<bash>" -lc "<payload>"` 即回到 `v2.0.0-preview.0`
