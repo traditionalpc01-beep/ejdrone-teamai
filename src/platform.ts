@@ -76,7 +76,12 @@ function gitInstallPathFromRegistry(env: NodeJS.ProcessEnv): string | null {
   return null;
 }
 
-function queryRegistryInstallPath(env: NodeJS.ProcessEnv, hive: 'HKLM' | 'HKCU'): string | null {
+/**
+ * 查单个 hive 的 GitForWindows InstallPath。导出不是为了给业务代码用（业务只走 findGitBash），
+ * 而是让真机验证脚本能只针对 HKCU 跑生产代码路径 —— 注入式单测的注册表读取器是假的，
+ * 「HKCU 有值而 HKLM 没有」这个子形态在真机上只有这条路能按原代码验证。
+ */
+export function queryRegistryInstallPath(env: NodeJS.ProcessEnv, hive: 'HKLM' | 'HKCU'): string | null {
   try {
     const out = execFileSync('reg', ['query', `${hive}\\SOFTWARE\\GitForWindows`, '/v', 'InstallPath'], {
       env,
