@@ -1,6 +1,6 @@
 {
   "name": "ejdrone-skills",
-  "version": "2.0.0-preview.1",
+  "version": "2.0.0",
   "description": "Git-native team skills/rules sync with role-based distribution for AI coding agents",
   "type": "module",
   "license": "UNLICENSED",
