@@ -84,7 +84,11 @@ A 也是直接测适配器与 `planAgents`。等协调者接线后再补一层�
 - [x] **T7.6 门槛**：`npm run typecheck` + `npm test` **全量**绿（不只跑新增文件）。
   端到端 `test/integration/agents.test.ts`：根 agent + ns agent → pull → claude(`.md`) 与 codex(`.toml`) 内容正确
   → 切角色后 ns agent 移除、根 agent 保留 → 二次 pull 幂等 → 成员改过投递文件后 pull 只点名不覆盖 → uninstall 无残留。
-- [ ] **T7.7 真机**：claude 投一个 agent，`/agents` 里可见可用；codex 看 `<name>.toml` 是否被列出。试验记录由协调者归档。
+- [x] **T7.7 真机**：claude 投一个 agent，`/agents` 里可见可用；codex 看 `<name>.toml` 是否被列出。
+  2026-10-13 已关闭（GA 收尾，证据在 `docs/trials/2026-10-13-windows-real-trial.md` §9）：真实 Claude Code 会话的
+  `/agents` 面板列出了投递字节（项目级 `.claude/agents/` 与成员真实 `~/.claude/agents` 各目视一次，后者 216 份
+  自有 agent 对账还原逐字节一致）；SessionStart hook 在真实 claude 进程里触发并自动拉回新推的 skill。
+  headless `-p` 在该机不可用（端口被另一网关占用、成员 token 被拒），目视走 TUI 路线完成。
 
 ## 3. M8 · 团队知识（owner B）
 
@@ -97,31 +101,38 @@ A 也是直接测适配器与 `planAgents`。等协调者接线后再补一层�
   默认输出「路径 + 命中片段 ±2 行」；`--check` 输出 `RELEVANT score=<n> threshold=<n>` / `NOT_RELEVANT ...`，
   返回 0/1，**不投票不写日志**（这条语义是给 hook/skill 预检用的，必须与 teamai 一致）；`--json` 机器可读。
   镜像目录不存在 → 提示「还没 pull 过」并返回 0（不是错误状态）。
-- [ ] **T8.3 内置 skill**：`ejdrone-recall` —— 教 agent 动手前先 `ejdrone recall --check "<关键词>"`，RELEVANT 才读文件。
+- [x] **T8.3 内置 skill**：`ejdrone-recall` —— 教 agent 动手前先 `ejdrone recall --check "<关键词>"`，RELEVANT 才读文件。
   放进 `src/cli/init.ts` 的种子内容与 `src/cli/team-readme.ts` 生成的 README；`push` 侧把 `ejdrone-recall` /
   `ejdrone-share` 设为**保留名拒绝入库**（照 teamai 的 `teamai-recall` 永不 push）。
+  落地证据：`skills/ejdrone-recall/SKILL.md`、`src/cli/constants.ts` 的 `BUILTIN_SKILL_NAMES`、
+  `test/integration/readme.test.ts` 5 例（含「成员本地那份 pull 下来的内置技能，push 仍被拒且仓库那份一字未动」）。
 - [x] **T8.4 docs 镜像回归**：契约层已接好，B 负责把行为钉住：ns 过滤、`docs/<ns>/<name>.md` 镜像路径、
   成员改过镜像副本 → keep 点名、ns 失效 → 删除、`team-codebase` 保留名跳过。
-- [ ] **T8.5 门槛**：typecheck + 全量测试绿；端到端 `test/integration/knowledge.test.ts` 覆盖 T8.4 全部五条 +
+- [x] **T8.5 门槛**：typecheck + 全量测试绿；端到端 `test/integration/knowledge.test.ts` 覆盖 T8.4 全部五条 +
   recall 命中根文档 / 不命中未激活 ns 文档 / `--check` 两种退出码。
-- [ ] **T8.6 真机**：本机三次真实 recall（中英混合 query），人工判读前 5 条可用性，结论写进试验记录（协调者归档）。
+  （2026-10-12 合入时 52 文件 / 883 例全绿；2026-10-13 Windows 真机 53 文件 / 893 例全绿。）
+- [x] **T8.6 真机**：本机三次真实 recall（中英混合 query），人工判读前 5 条可用性，结论写进试验记录（协调者归档）。
+  （2026-10-13 Windows 真机做了 5 组中英混合 query，含 `rebalance partition` 正确判 NOT_RELEVANT，
+  见 `docs/trials/2026-10-13-windows-real-trial.md`。）
 
 ## 4. M9 · 经验沉淀（owner C，依赖 B 的 recall 扫描范围）
 
-- [ ] **T9.1 learning 文件形态**：`src/core/learning.ts` —— frontmatter `title/date/tags[]`，
+- [x] **T9.1 learning 文件形态**：`src/core/learning.ts` —— frontmatter `title/date/tags[]`，
   **缺则补、不缺不拒绝**（teamai 要求 tags 2–5 个否则不让提，我们靠 MR 评审补，见父计划 §7.1）；
   slug 允许中文、长度受限；文件名 `learnings/<YYYY-MM-DD>-<slug>.md`，**目标已存在就拒绝并提示改名**（不加 rand6）。
-- [ ] **T9.2 命令**：`src/cli/contribute.ts` 导出 `contributeCommand(ctx, options: { file: string; title?: string; ns?: string; dryRun?: boolean })`：
+  （`test/core/learning.test.ts` 16 例。）
+- [x] **T9.2 命令**：`src/cli/contribute.ts` 导出 `contributeCommand(ctx, options: { file: string; title?: string; ns?: string; dryRun?: boolean })`：
   读文件 → 校验/补全 frontmatter → 复用 `push` 的分支 + MR 管线写进 `learnings/`（**不是** teamai 的孤儿分支）→
   输出 MR 链接或 generic provider 的手动开 MR 指引。`--dry-run` 只打印落库后的文件内容与目标路径，
   **一个 git 副作用都不许有**（不建分支、不 push、不开 MR）。`--ns` 多 namespace 角色必给，与 push 同规则。
-- [ ] **T9.3 内置 skill**：`ejdrone-share` —— 被反复纠正/工具连续失败时主动总结成 learning 并提示用户跑 contribute；
-  只在用户明确说「分享给团队」时才真的执行。
-- [ ] **T9.4 门槛**：typecheck + 全量测试绿；端到端 `test/integration/learnings.test.ts`：
+  （`test/cli/contribute.test.ts` + `test/integration/learnings.test.ts` 7 例，`--dry-run` 断言远端分支集合与 main sha 逐字不变。）
+- [x] **T9.3 内置 skill**：`ejdrone-share` —— 被反复纠正/工具连续失败时主动总结成 learning 并提示用户跑 contribute；
+  只在用户明确说「分享给团队」时才真的执行。（`skills/ejdrone-share/SKILL.md`，保留名同 T8.3。）
+- [x] **T9.4 门槛**：typecheck + 全量测试绿；端到端 `test/integration/learnings.test.ts`：
   contribute → 合入 → 另一成员 pull → 镜像里出现该 learning → recall 命中它；`--dry-run` 无副作用；同名文件拒绝。
-- [ ] **T9.5（stretch，可砍）** Stop hook 摩擦提示：先探针查 claude/codex/qoder-cn 的 Stop 事件与 transcript
-  可读性；三选二探得通才实现（单项 ×20、阈值 20、每会话最多一次）。**探不通就砍，M9 验收不等它**，
-  把探测结论写进交付说明。
+- ~~**T9.5（stretch，可砍）** Stop hook 摩擦提示~~ **已砍**（2026-10-12 探测结论：`paths.ts` 只有单值
+  `hookEvent`（全为 SessionStart），Stop 事件的可读 stdin/transcript 在 claude/codex/qoder-cn 三家 0 家有据，
+  按「三选二才做」判据不达线；登记在父计划 §7.2）。
 
 ---
 

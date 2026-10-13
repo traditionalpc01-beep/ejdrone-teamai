@@ -173,6 +173,7 @@ LOCALAPPDATA 缺失且注册表也没有 → findGitBash=null、hookCommand=null
 只有「HKCU 有值而 HKLM 没有」这一子形态仍未真机验证：本机 HKLM 装了 Git，
 要造出那台机器形态得改系统注册表，不在试验里动系统配置。该分支由 `test/platform.test.ts`
 的注入用例覆盖（HKLM→HKCU 顺序、`reg` 失败静默继续）。
+> **2026-10-13 GA 收尾更新**：该子形态已真机验证并销记，见 §9.4（用户 hive 植键指向真实 Git，无害且已删净）。
 
 ### 7.2 已关闭：Windows 上的 npm 全局安装（`.cmd` 垫片形态）
 
@@ -193,6 +194,9 @@ uninstall --force → 退出码 0，wrapper 已删，投递文件与记账清干
 在 npm 垫片下解析到的仍是真实 `dist/cli.js`。
 
 ### 7.3 未关闭（环境阻塞）：真实工具会话内的可见性
+
+> **2026-10-13 GA 收尾更新**：本节两条（`/agents` 目视、SessionStart 触发）已通过 TUI 路线全部关闭，
+> 根因也比本节记录的更深（端口被另一网关占用、成员 token 被拒），证据与截图见 §9.1–§9.3。
 
 试了两种不碰成员真实配置的做法：`claude -p … --output-format json`（headless）以及
 带 `--include-hook-events` 的 stream-json 会话 —— **本机 headless Claude 在 150s 内零输出、退出码 124**，
@@ -256,6 +260,9 @@ Windows 上所有 MCP merge 写与 0600 收紧写全废）当时写的是「代�
 | `uninstall --force` 后还原对账 | `settings.json` 与 init 前**逐字节一致**；216 份 agent 全部一致、零缺失零新增；4 个投递文件与其记账清除；`~/.ejdrone` 已移除（试验前不存在）；`rules` 空目录已清理 |
 
 **仍未拿到的**：在真实会话里目视确认 `/agents` 列出投出去的 agent、`SessionStart` 被工具触发。
+> **2026-10-13 GA 收尾更新**：两项都已拿到——`/agents` 在真实用户目录形态下列出投递 agent（§9.2，
+> 216 份对账还原逐字节一致），`SessionStart` 在真实 claude 进程里触发并完成自动拉新（§9.3）。
+> 下面「GA 前两分钟」的人工步骤已由 TUI 驱动代为执行，原文保留作方法记录。
 原因是环境而不是代码 —— 这台机器的 Claude Code 配置把 `ANTHROPIC_BASE_URL` 指向本地代理
 `127.0.0.1:15721`，代理未运行时 `claude` 进程**零输出直到超时**（`--output-format stream-json
 --include-hook-events` 与普通 `-p` 都是 `status=null`、0 字节），所以任何 headless 探针都拿不到数据。
@@ -278,11 +285,62 @@ ls ~/.claude/skills           # 团队 skill 应已在里面
 
 ## 8. 仍然遗留
 
-1. 真实工具会话内的目视确认（§7.3 环境根因 + §7.6 的两分钟人工步骤）。
-2. HKCU-only 的 Git 注册表形态（§7.1，要动系统注册表才能造）。
+> **2026-10-13 GA 收尾更新**：第 1、2 条已全部关闭，证据见 §9。第 3 条（P3 观察池）不阻塞 GA，维持登记。
+
+1. ~~真实工具会话内的目视确认（§7.3 环境根因 + §7.6 的两分钟人工步骤）~~ **已关闭（§9.1/§9.2）**。
+2. ~~HKCU-only 的 Git 注册表形态（§7.1，要动系统注册表才能造）~~ **已关闭（§9.4）**。
 3. P3 观察池不变（ledgerEntry Map 索引、probe 显式化、debug.log 轮换、doctor.ts 拆分）。
 
-## 9. 回滚
+## 9. GA 收尾（2026-10-13 下午，销记 §8 前两条遗留）
+
+headless 仍不可用，但根因比 §7.3 记录的更深一层：`127.0.0.1:15721` 现在确实有进程在听（PID 22512），
+但它是**另一个网关**——用成员 `ANTHROPIC_AUTH_TOKEN` 直连 `/v1/messages` 得 401 `Invalid token`
+（`/v1/models` 200 说明服务本身活着）。即成员自己的 claude 路由器并没在跑，端口被占。
+因此本轮目视不走 headless，改用 TUI 路线：`/agents` 面板与 SessionStart hook 都是客户端行为，不依赖模型出口。
+截图与脚本留在 `%TEMP%\ga-verify\`（shot-*.png、ga-chain.mjs、ga-hkcu.mjs、canary-settings.json、
+hook-settings.json、agents-baseline-manifest.txt）。
+
+### 9.1 真实会话 `/agents` 目视（项目级）
+
+隔离 HOME 用真实 CLI 跑完整链路（`ga-chain.mjs`：裸 origin → 种子仓库 → `init --agent claude --role be`
+→ `pull`），拿到投递给 claude 的 `ga-verify-agent.md` 字节，原样放进临时项目目录的 `.claude/agents/`。
+真实 Claude Code（2.1.283）TUI 会话里输入 `/agents`：面板列出 `ga-verify-agent`，
+描述「GA 验证专用 agent，确认工具真实加载」逐字一致（shot-agents-panel.png）。
+
+### 9.2 真实会话 `/agents` 目视（成员真实 `~/.claude/agents`）与还原对账
+
+按 §7.6 的纪律做单文件往返：**现算** 216 份 sha256 基线（不手写数字）→ 把同一份投递字节拷进真实
+`~/.claude/agents/` → 在无项目级 agent 的中性目录开 TUI 会话 → `/agents` 面板在 general-purpose
+之下第二位列出 `ga-verify-agent`（shot-real-agents.png，此时列表来源只能是用户级目录）→ 退出会话、
+删除该文件 → 复算 manifest：**216 份逐字节一致、零缺失零新增**（agents-after-manifest.txt 与基线 diff 为空）。
+
+### 9.3 SessionStart hook 在真实 claude 进程里触发 + 自动拉回新内容
+
+`-p` 虽然挂死（等模型出口），但会话启动序列在模型请求**之前**执行，两轮验证都吃到了副作用：
+
+1. **canary**：`--settings` 注入 `cmd.exe /c "echo fired >> canary.txt"`，`claude -p` 挂死后 canary 文件
+   已写入（`fired`）——SessionStart 确实被真实 claude 进程触发。
+2. **真命令全链路**：`--settings` 指向 init 产出的 wrapper（唯一改动：内层命令前缀
+   `HOME='<夹具>' EJDRONE_HOME='<夹具>'`，把投递钉死在隔离层，绝不碰真实配置）。`claude -p` 挂死后，
+   夹具 HOME 里出现了 origin 在 pull 之后新推的 `ga-new-skill` —— **真实 claude 会话启动 → 我们的
+   wrapper（cmd → Git Bash → node cli pull --silent）→ 自动拉新**整条链路成立。
+
+### 9.4 HKCU-only Git 注册表形态（销记 §7.1 最后一条）
+
+`platform.ts` 把 `queryRegistryInstallPath` 导出（仅 +6 行注释性导出，无行为变化），让真机脚本能
+**按生产代码路径**只跑 HKCU 分支。四步验证（`ga-hkcu.mjs`）：植键前确认 `HKCU\Software\GitForWindows`
+不存在（成员注册表原样）→ 植入 `InstallPath = D:\Program Files\Git`（指向真实安装，即使键泄漏行为也与
+现状一致）→ `findGitBash`（ProgramFiles/LOCALAPPDATA 全空的 env + 真实 reg.exe 输出）经 HKCU-only
+找到 `D:\Program Files\Git\bin\bash.exe` 且文件真实存在 → 删键后 HKCU-only 返回 null、默认路径仍从
+HKLM 找到真 Git。至此「HKCU 有值而 HKLM 没有」不再是只靠注入用例覆盖的分支。
+
+### 9.5 本轮代码变更
+
+只有 `src/platform.ts` 的 `queryRegistryInstallPath` 导出（含 JSDoc 说明导出理由）；其余全是文档与
+发版动作。HKCU 植键为什么不做成永久 `runIf(win32)` 用例：测试套件会在每台 Windows 开发机上写注册表，
+对宿主机是超出测试职责的副作用，维持一次性脚本 + 本节记录的形态。
+
+## 10. 回滚
 
 代码层：本轮改动都在 `release/2.0-preview` 上、尚未推送；回滚 = revert 对应提交。
 hook 形态单独可回退：把 `win32Hook()` 的 `command` 改回 `"<bash>" -lc "<payload>"` 即回到 `v2.0.0-preview.0`

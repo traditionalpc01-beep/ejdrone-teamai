@@ -552,7 +552,7 @@ M10 的资源前置到位后第一次在 Windows 真机上跑，下列结论**�
 |---|---|---|---|
 | 1 | `paths.ts` 16 行表项；每工具 skills/rules 落点、hook 落点；doctor 逐项可查 | 达成 | `test/agents/suite.test.ts` 144 例公共六项 × 16 工具、`test/integration/all-tools.test.ts` 16 工具一次性 init+pull 并断言「账本里没有一个路径落在 16 个工具根之外」；macOS 与 Windows 双端绿 |
 | 2 | `mcp/mcp.yaml` → 各工具原生 MCP 配置，受管条目合并不动用户条目 | 达成 | §3.3 六条规则逐条单测（`test/core/apply.test.ts` 34 例、`test/core/merge.test.ts` 26 例）；Windows 真机把 stdio+http（带 `${VAR}`）投进**成员真用的** `.claude.json`/`config.toml`/`settings.json`，自有条目保留、卸载后三文件逐字节还原（`docs/trials/2026-10-13-windows-real-trial.md` §4/§7.6） |
-| 3 | `agents/` → 各工具原生 agents 目录，按工具转换格式 | 达成 | `test/agents/agentfmt.test.ts` 17 例四形态 + 往返不丢字段；真机内容级核对：claude 收 `.md`、codex 收 `.toml` 且确实没有 tools 键、ns agent 只给订阅角色（§7.6 还证明投进 216 份自有 agent 的目录时一字节没动别人的）。**唯一未做**：会话里 `/agents` 的目视确认 |
+| 3 | `agents/` → 各工具原生 agents 目录，按工具转换格式 | 达成 | `test/agents/agentfmt.test.ts` 17 例四形态 + 往返不丢字段；真机内容级核对：claude 收 `.md`、codex 收 `.toml` 且确实没有 tools 键、ns agent 只给订阅角色（§7.6 还证明投进 216 份自有 agent 的目录时一字节没动别人的）。~~**唯一未做**：会话里 `/agents` 的目视确认~~ **2026-10-13 GA 收尾已补齐**：真实 Claude Code TUI 会话的 `/agents` 面板列出投递 agent（项目级与成员真实 `~/.claude/agents` 两轮，216 份对账还原逐字节一致），SessionStart 亦在真实 claude 进程触发并自动拉新（试验记录 §9） |
 | 4 | `docs/` 镜像 + `ejdrone recall` 可检索 | 达成 | `test/integration/knowledge.test.ts` 15 例（含「停用 ns 后那份镜像被删除」哨兵）；真机 5 组中英文 query 人工判读，`rebalance partition` 得 score=1 → 正确判 `NOT_RELEVANT`（退出码 1），中文标题/正文命中正常 |
 | 5 | `learnings/` + `contribute`（走 MR）+ recall 可检索 | 达成 | `test/integration/learnings.test.ts` 7 例；真机全链路：写 learning → `contribute` 推分支 → 模拟评审合入 → **第二个成员** pull → 镜像出现 → `recall --check` 得 `RELEVANT score=13`；`--dry-run` 远端分支集合与 main sha 逐字不变 |
 | 6 | Windows 真机 init → pull → hook 自动 pull → doctor 全绿；e2e 在 Windows 跑通 | 达成 | `npm test` 在 Windows 10 真机 53 文件 / 893 例全绿；doctor `win:gitbash`/`win:git`/`win:hookbash` 三条全 PASS；hook 命令被 cmd×3 / PowerShell / pwsh / Git Bash **六种启动方式真实执行**并自动拉回新推的 skill；per-user Git 形态与 `npm install -g` 垫片形态各自真机销记（§7.1/§7.2） |
@@ -564,6 +564,14 @@ M10 的资源前置到位后第一次在 Windows 真机上跑，下列结论**�
 未关掉的两项与它们的性质：真实会话内的目视确认（**环境阻塞**：模型出口指向未运行的本地代理，
 headless 零输出；两分钟人工步骤见试验记录 §7.6）、HKCU-only 的 Git 注册表形态（**要改系统注册表才能造**，
 注入式单测覆盖）。都不属代码缺口，因此本版按 preview 发：GA 前把目视那一步做掉即可。
+
+> **2026-10-13 GA 收尾更新**：上段两项均已关闭，2.0 以 `2.0.0`（GA）发版。目视项由 TUI 路线完成
+> （`/agents` 面板与 SessionStart 都是客户端行为，不依赖模型出口）：真实 Claude Code 会话的 `/agents`
+> 列出投递 agent —— 项目级 `.claude/agents/` 与成员真实 `~/.claude/agents`（216 份自有 agent 对账
+> 还原逐字节一致）各一轮；SessionStart 在真实 claude 进程触发并以 init 产出的 wrapper 完成自动拉新。
+> HKCU-only 形态经真实注册表植键按生产代码路径验证（用户 hive、指向真实 Git、验后删净）。
+> headless 不可用的根因同步查明：端口被另一网关占用、成员 token 被拒（401），非本仓代码问题。
+> 证据与截图：`docs/trials/2026-10-13-windows-real-trial.md` §9。
 
 ## 附：证据清单（2026-10-11 核对）
 
