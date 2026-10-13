@@ -74,7 +74,7 @@
 - CLI 一律经 `runCli(argv, ctx)`：返回退出码，绝不调用 `process.exit`，也不在模块级绑定 `process.env` ——
   端到端测试靠这两条才能在同一个进程里跑多个成员。
 - 适配器与状态层函数显式接收 `home: string, env: NodeJS.ProcessEnv`，不在函数外读 `process.env.HOME` / `homedir()`。
-- 2.0 有 16 个适配器，公共行为全在 `src/agents/common.ts`；适配器文件只做「声明 id + 组装」，
+- 2.0 GA 有 16 个适配器（GA 后新增 zcode，现共 17 个），公共行为全在 `src/agents/common.ts`；适配器文件只做「声明 id + 组装」，
   **不许出现 rulesMode / hook 的 if 判断** —— rules 的四种模式（rulesdir / mdc / block / none）在
   `planRulesFor` 里按表分派一处，模式实现分别在 `rulesdir.ts`、`mdc.ts`、`block.ts`。
 - 新增一个工具 = 在 `paths.ts` 填一行表 + 建 `src/agents/<id>.ts` + 在 `index.ts` 按表顺序注册 +

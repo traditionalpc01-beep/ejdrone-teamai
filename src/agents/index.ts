@@ -15,6 +15,7 @@ import { kiroAdapter } from './kiro.js';
 import { traeAdapter } from './trae.js';
 import { traeCnAdapter } from './trae-cn.js';
 import { hermesAdapter } from './hermes.js';
+import { zcodeAdapter } from './zcode.js';
 
 /** 顺序必须与 paths.ts 的 TOOL_PATHS 一致 —— 由 test/agents/adapters.test.ts 的 tripwire 守住。 */
 export const adapters: AgentAdapter[] = [
@@ -34,6 +35,7 @@ export const adapters: AgentAdapter[] = [
   traeAdapter,
   traeCnAdapter,
   hermesAdapter,
+  zcodeAdapter,
 ];
 
 /**

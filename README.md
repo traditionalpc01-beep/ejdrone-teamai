@@ -223,7 +223,7 @@ ejdrone contribute --file ./notes.md --dry-run  # 只看会写成什么样，一
 
 ## 支持的工具
 
-16 个工具，全部只有 user scope。「真机核实」列是本机（macOS）逐项盘出来的，没核到的格子一律标出来，不猜。
+17 个工具（2.0 GA 为 16 个，zcode 为 GA 后新增），全部只有 user scope。「真机核实」列是本机（macOS）逐项盘出来的，zcode 在 Windows 10 真机核实；没核到的格子一律标出来，不猜。
 
 | 工具 | skills | rules | MCP 落点 | agents 落点 | 真机核实 |
 |---|---|---|---|---|---|
@@ -243,6 +243,7 @@ ejdrone contribute --file ./notes.md --dry-run  # 只看会写成什么样，一
 | Trae | `~/.trae/skills/` | `~/.trae/rules/*.md`（原生目录） | — | — | 已核（无 hook 落点） |
 | Trae CN | `~/.trae-cn/skills/` | `~/.trae-cn/user_rules/*.md` | — | — | 部分（该目录存在但为空） |
 | DeepSeek Harness | `~/.dsh/skills/`（或 `$DSH_HOME`） | `~/.dsh/AGENTS.md` 团队区块 | — | — | 未核（本机未装） |
+| ZCode | `~/.zcode/skills/` | — | — | `~/.zcode/agents/*.md` | 已核（2026-10-13 Windows 真机：会话可用技能列表逐条列出 `~/.zcode/skills` 内容，自有 `codingagent.md` 的 name/description 出现在可用 agent 类型里；无公开的用户级 hook/MCP 载点，`~/.zcode/v2/*` 是内部应用状态不碰） |
 
 `—` = 该工具没有可写的 markdown rules 载体，团队规范不下发给它（宁可少投递，也不往它不读的位置硬写）。
 
@@ -286,7 +287,7 @@ doctor → uninstall` 全流程跑通，逐字节还原对账见 `docs/trials/20
 - **mdc**（Cursor）：`.mdc` 格式，需要重写 frontmatter（`description` / `globs` / `alwaysApply`）
 - **block**（Codex / GitHub Copilot CLI / OpenCode / DeepSeek Harness）：没有 markdown rules 载体，
   只能往它们的 `AGENTS.md` 里插一个 `<!-- [ejdrone:team-rules:start] -->` 标记区块。**标记外的你自己的内容永不被动。**
-- **none**（CodeBuddy / WorkBuddy / Pi / OpenClaw / Hermes / Kiro）：既没有 rules 目录也没有可写的 `AGENTS.md`，
+- **none**（CodeBuddy / WorkBuddy / Pi / OpenClaw / Hermes / Kiro / ZCode）：既没有 rules 目录也没有可写的 `AGENTS.md`，
   团队规范**不下发给它** —— 往它不读的位置硬写文件，只会留下一份没人看的副本和一个可能被误删的用户目录。
 
 模式由 `src/agents/paths.ts` 的表决定，`src/agents/common.ts` 一处按表分派；加新工具是填表，不是抄判断。

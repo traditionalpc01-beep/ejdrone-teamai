@@ -1,7 +1,7 @@
 import { isAbsolute, join } from 'node:path';
 
 /**
- * 16 个工具的路径表 —— 全项目唯一的落点定义处。
+ * 17 个工具的路径表 —— 全项目唯一的落点定义处（2.0 GA 为 16 个，zcode 为 GA 后新增）。
  * 某个工具改了目录约定，只改这张表。
  *
  * `probe` 文案带「未核对 / 待真机 / PROBE」的项仍属猜测落点，`ejdrone doctor` 会以 WARN 逐条列出。
@@ -158,7 +158,7 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     rulesBlockFile: 'AGENTS.md',
     hookFile: 'hooks.json',
     hookEvent: 'SessionStart',
-    probe: '本机未安装 DeepSeek Harness（无 ~/.dsh、DSH_HOME 未设置），未核对，保留 PROBE：DSH_HOME 未设置时回落 ~/.dsh；skills 落点与 hook 落点均待真机确认',
+    probe: '真机核对(2026-10-13 Windows 10，本机装 dsh desktop)：skills 落点 ~/.dsh/skills 与 AGENTS.md 团队区块均内容级确认 —— dsh 会话的可用技能列表出现我们投递的 photo-shoot-organizer；会话内问「团队校验口令」，agent 14 秒答出规则里埋的锚点 DEMO-TRIAL-20261011-A7 并引用 ~/.dsh/AGENTS.md（证据归档 docs/trials/2026-10-13-zcode-dsh-learnings-real-trial.md）。desktop 原生目录没有 skills/AGENTS.md/hooks.json（三者均由投递新建；~/.dsh 自有 .agent-presets/profiles/sessions 等结构）。hook 落点未核对且有一轮负面证据：hooks.json 写入正常但 SessionStart 未触发（会话启动时远端已有新提交，账本与投递纹丝未动），是否被 dsh 读取待核；DSH_HOME 未设置时回落 ~/.dsh',
   },
   qoder: {
     id: 'qoder',
@@ -281,6 +281,16 @@ export const TOOL_PATHS: Record<string, ToolPathSpec> = {
     skillsSubdir: 'skills',
     rulesMode: 'none',
     probe: '已真机核对(2026-10-11)：~/.hermes/skills 存在，skills 落点确认。不设 hook：~/.hermes/hooks 是空目录而非 JSON 配置文件，我们的 upsertHook 只支持 {hooks:{Event:[…]}} 形状，硬写会造出该工具不认的文件；hermes 的 hook 契约待真机确认。rules 置 none（另有 config.yaml，非 markdown rules 载体）',
+  },
+  zcode: {
+    id: 'zcode',
+    label: 'ZCode',
+    rootRel: '.zcode',
+    skillsSubdir: 'skills',
+    rulesMode: 'none',
+    agentsSubdir: 'agents',
+    agentsFormat: 'md',
+    probe: '已真机核对(2026-10-13 Windows 10)：~/.zcode/skills 被 ZCode 真读 —— 本机 ZCode 会话的可用技能列表逐条列出该目录下 30+ 份技能（内容级证据）；agents 落点 ~/.zcode/agents/*.md 同为内容级确认 —— 我们投递的 review-assistant.md 与 be-deploy-bot.md 在新开的真实 ZCode 会话里出现在可用 agent 类型中（用户目视，2026-10-13），md 形态确认（ZCode 自家文件带 color/thoughtLevel 等扩展 frontmatter 键，宽容非标键；我们写入的 tools/model 键是否被读取未证，最坏被忽略）。rules 置 none：ZCode 读的是工作区级 AGENTS.md（项目 scope），~/.zcode 下无用户级 markdown rules 载体。不设 hook 与 mcpTarget：~/.zcode/v2/* 是 ZCode 内部应用状态（与 credentials.json 混放），无公开的用户级 hook/MCP 载体，照 hermes/openclaw 先例不硬写内部文件',
   },
 };
 
