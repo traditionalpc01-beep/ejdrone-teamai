@@ -1,0 +1,30 @@
+# 依赖与构建产物
+node_modules/
+dist/
+*.tsbuildinfo
+
+# 测试与本地运行产生的文件
+coverage/
+*.log
+*.tmp-*
+sync.lock
+
+# 本地试用时可能落在项目里的伪造状态目录
+.ejdrone/
+.ejdrone-*/
+
+# AI 工具在本仓库里落的私有状态（会话记忆、评审产物）。
+# 这个仓库会被投递到成员的工具目录，全量暂存时不能把个人会话记录带进团队历史。
+.workbuddy/
+.qoder/
+
+# 环境变量与凭据（token 只应从环境变量读，绝不入库）
+.env
+.env.*
+!.env.example
+
+# 编辑器与系统
+.DS_Store
+.idea/
+.vscode/
+*.swp

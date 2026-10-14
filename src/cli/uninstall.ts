@@ -1,0 +1,269 @@
+import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { isAbsolute, relative } from 'node:path';
+
+import { registry } from '../agents/index.js';
+import { hookTarget, mcpTargetPath } from '../agents/paths.js';
+import { mergeEntries } from '../core/merge.js';
+import { isKnowledgePath } from '../core/knowledge.js';
+import { hasHook } from '../hooks.js';
+import { hashContent, loadLedger, replaceFileSync, saveLedger } from '../core/ledger.js';
+import { BLOCK_END, BLOCK_RESOURCE_KEY, BLOCK_START } from '../agents/block.js';
+import { locateRegion, normalizeInner, stripRegion } from '../core/region.js';
+import type { LedgerEntry } from '../core/types.js';
+import { configPath, hookWrapperPath, ledgerPath, loadConfig } from '../state.js';
+import type { CliContext } from './context.js';
+import { managedRoots } from './delivery.js';
+import { pruneAfterDeletions } from './dirclean.js';
+
+export interface UninstallOptions {
+  force?: boolean;
+}
+
+/**
+ * 卸载侧的原子写：与 hooks.ts 的 atomicWrite 同款——临时文件按目标原权限创建，
+ * replaceFileSync 落盘（win32 先删后 rename，POSIX 就是 rename）。
+ * 为什么必须原子：这两处写的是成员在用的真实配置（~/.claude.json 一类 22KB 状态文件、
+ * AGENTS.md），中断/崩溃留半写文件 = 直接损坏成员环境；pull 侧的 merge 写早已原子化，
+ * 卸载侧不能是例外。权限不回松：成员 0600 的文件不会因重写一次变成 0644。
+ * 两个调用点都先确认文件可读（current 非 null），所以 statSync 不会 ENOENT。
+ */
+function replaceFileAtomic(filePath: string, text: string): void {
+  const prevMode = statSync(filePath).mode & 0o777;
+  const tmp = `${filePath}.tmp-${process.pid}`;
+  writeFileSync(tmp, text, { encoding: 'utf8', mode: prevMode });
+  replaceFileSync(tmp, filePath);
+}
+
+/**
+ * 这条记账是不是"条目级合并"的落点，以及那个落点在哪。
+ * 工具 id 从合成 key `mcp:<tool>-merge` 里取：账本里不重复存 format/pointer，
+ * 那张表只有一个真源（paths.ts），存两份会在改表之后互相打脸。
+ */
+function mergeTargetOf(
+  entry: LedgerEntry,
+  ctx: CliContext,
+): { format: 'json' | 'toml'; pointer: string[] } | null {
+  if (!entry.resource.startsWith('mcp:') || !entry.resource.endsWith('-merge')) return null;
+  const id = entry.resource.slice('mcp:'.length, entry.resource.length - '-merge'.length);
+  try {
+    return mcpTargetPath(id, ctx.home, ctx.env);
+  } catch {
+    return null; // 表里已经没有这个工具了：不动成员的文件
+  }
+}
+
+export async function uninstallCommand(ctx: CliContext, options: UninstallOptions): Promise<number> {
+  if (!options.force) {
+    if (!ctx.interactive) {
+      ctx.err('错误：非交互模式下 uninstall 需要显式确认。');
+      ctx.err('下一步：确认后运行 ejdrone uninstall --force');
+      return 1;
+    }
+    const ok = await ctx.confirm(
+      '将移除所有 ejdrone hook 并删除由本工具投递的 skill/rule 文件（你改过的会保留），继续吗？',
+      false,
+    );
+    if (!ok) {
+      ctx.out('已取消，未做任何改动。');
+      return 0;
+    }
+  }
+
+  const adapters = registry().all();
+  const { config, error } = loadConfig(ctx.env);
+  if (config === null) {
+    ctx.out(`提示：没有可用 config（${error ?? '尚未初始化'}），仍会清理 hook 与投递记账`);
+  }
+
+  for (const adapter of adapters) {
+    // 只处理真的装了我们 hook 的工具：没装过的话 removeHook 也不会写文件，
+    // 但报"已清理"会误导人以为动过那个工具的配置。
+    const target = hookTarget(adapter.id, ctx.home, ctx.env);
+    if (target === null || !existsSync(target.path) || !hasHook(target.path, target.event)) continue;
+    try {
+      adapter.uninstallHook(ctx.home, ctx.env);
+      ctx.out(`hook：${adapter.label} 已清理`);
+    } catch (e) {
+      ctx.out(`hook：${adapter.label} 清理失败：${e instanceof Error ? e.message : String(e)}`);
+      ctx.out(`        下一步：手动检查 ${target.path}（hook 配置文件，在工具自己的目录里）`);
+    }
+  }
+
+  // Windows 的 hook payload 存在自家状态目录的 wrapper 文件里。hook 条目已上面清掉，
+  // wrapper 留着就是一段没人引用的死代码；它在 ~/.ejdrone 下（我们建的），删不影响成员目录。
+  const wrapper = hookWrapperPath(ctx.env);
+  if (existsSync(wrapper)) {
+    try {
+      unlinkSync(wrapper);
+      ctx.out(`hook wrapper：${wrapper} 已删除`);
+    } catch (e) {
+      ctx.out(`hook wrapper 删除失败：${e instanceof Error ? e.message : String(e)}`);
+      ctx.out(`        下一步：手动删掉 ${wrapper}（工具侧 hook 条目已清理，留着不会被执行）`);
+    }
+  }
+
+  const file = ledgerPath(ctx.env);
+  const { ledger, warning } = loadLedger(file);
+  if (warning) ctx.out(`提示：${warning}`);
+
+  // 与 delivery.ts 的 isManaged 同一条判据：适配器落点 ∪ 知识镜像根。
+  // 少了镜像根，卸载会把 `~/.ejdrone/knowledge/` 里我们投的文档当别人的文件留下（账本却已清，从此无人认领）。
+  const owned = (path: string): boolean =>
+    adapters.some((adapter) => adapter.ownsPath(path, ctx.home, ctx.env)) || isKnowledgePath(path, ctx.env);
+  const removed: LedgerEntry[] = [];
+  const stripped: LedgerEntry[] = [];
+  /** 撤完区块后只剩空白的文件：留着但要被说出来，别让人以为已经清干净 */
+  const blankBlockFiles: string[] = [];
+  const kept: Array<{ entry: LedgerEntry; reason: string }> = [];
+
+  for (const entry of ledger.entries) {
+    if (!existsSync(entry.path)) {
+      removed.push(entry);
+      continue;
+    }
+    let current: string | null = null;
+    try {
+      current = readFileSync(entry.path, 'utf8');
+    } catch {
+      current = null;
+    }
+
+    const mergeTarget = mergeTargetOf(entry, ctx);
+    if (mergeTarget !== null && entry.managedKeys !== undefined) {
+      // 条目级合并（MCP）：那个配置文件归成员在用，只撤我们自己投递的那几条，绝不删整个文件。
+      // 成员改过的那条留着 —— 并把它继续记在账本里（下面 kept 的条目不进 dropped）。
+      if (current === null) {
+        kept.push({ entry, reason: '读取失败' });
+        continue;
+      }
+      const outcome = mergeEntries({
+        format: mergeTarget.format,
+        pointer: mergeTarget.pointer,
+        current,
+        previous: entry.managedKeys,
+        desired: {},
+      });
+      if (!outcome.ok) {
+        kept.push({ entry, reason: `配置无法解析或形状不认识，没动它：${outcome.error ?? '未知原因'}` });
+        continue;
+      }
+      const edited = (outcome.kept ?? []).filter((k) => k.reason === 'modified-locally').map((k) => k.key);
+      if (outcome.changed && outcome.text !== undefined) {
+        try {
+          replaceFileAtomic(entry.path, outcome.text);
+        } catch (e) {
+          kept.push({ entry, reason: `写入失败：${e instanceof Error ? e.message : String(e)}` });
+          continue;
+        }
+      }
+      if (edited.length > 0) {
+        // 账本收窄到你改过的那几条：我们撤掉的部分已经不在这个文件里了，
+        // 留着旧 keys 会让下次 pull 把它们当成"还在成员机器上"。
+        const narrowed = new Set(edited);
+        const keys: Record<string, string> = {};
+        for (const [key, hash] of Object.entries(entry.managedKeys)) if (narrowed.has(key)) keys[key] = hash;
+        entry.managedKeys = keys;
+        kept.push({ entry, reason: `条目 ${edited.map((k) => `"${k}"`).join('、')} 被你改过，留着没撤` });
+      } else {
+        stripped.push(entry);
+      }
+      continue;
+    }
+
+    if (entry.resource === BLOCK_RESOURCE_KEY) {
+      // 区块文件（AGENTS.md 一类）是用户的：撤掉标记后标记外的内容一律保留，绝不删有内容的文件。
+      // 但如果撤完只剩空白，说明这文件本来只为我们的区块而存在（2026-10-13 Windows 真机
+      // 试验：全新成员机器上 uninstall 之后留下一个 0 字节的 .codex/AGENTS.md）。
+      // 这条删除只作用于 ledger 里记着的路径 —— 不在账上的文件仍按 §10 红线视为用户的，永不删。
+      if (current === null) {
+        kept.push({ entry, reason: '读取失败' });
+        continue;
+      }
+      const loc = locateRegion(current, BLOCK_START, BLOCK_END);
+      if (loc === null) {
+        stripped.push(entry);
+        continue;
+      }
+      const inner = current.slice(loc.contentStart, loc.contentEnd);
+      if (hashContent(normalizeInner(inner)) !== entry.hash) {
+        kept.push({ entry, reason: '本地已修改（区块被你改过，撤掉会丢你的内容）' });
+        continue;
+      }
+      const remainder = stripRegion(current, loc);
+      if (remainder.trim() === '') {
+        // 撤完只剩空白：这文件本来只为我们的区块而存在（2026-10-13 Windows 真机试验里
+        // 全新成员机器上留下过 0 字节的 .codex/AGENTS.md）。仍然不删 —— 区块文件住在
+        // `~/.codex/AGENTS.md` 这类工具原生路径上，我们分不清是不是工具自己要建的，
+        // 与「空目录只报告不删」同一条理由；但要把它说出来，别让人当成已经清干净了。
+        try {
+          replaceFileAtomic(entry.path, remainder);
+          stripped.push(entry);
+          blankBlockFiles.push(entry.path);
+        } catch (e) {
+          kept.push({ entry, reason: `写入失败：${e instanceof Error ? e.message : String(e)}` });
+        }
+        continue;
+      }
+      try {
+        replaceFileAtomic(entry.path, remainder);
+        stripped.push(entry);
+      } catch (e) {
+        kept.push({ entry, reason: `写入失败：${e instanceof Error ? e.message : String(e)}` });
+      }
+      continue;
+    }
+
+    if (!owned(entry.path)) {
+      kept.push({ entry, reason: '不在本工具管理的目录内' });
+      continue;
+    }
+    if (current === null || hashContent(current) !== entry.hash) {
+      kept.push({ entry, reason: current === null ? '读取失败' : '本地已修改' });
+      continue;
+    }
+    unlinkSync(entry.path);
+    removed.push(entry);
+  }
+
+  const dropped = new Set<LedgerEntry>([...removed, ...stripped]);
+  const remaining = ledger.entries.filter((entry) => !dropped.has(entry));
+  if (remaining.length === 0) {
+    if (existsSync(file)) unlinkSync(file);
+  } else {
+    saveLedger(file, { version: ledger.version, entries: remaining });
+  }
+  pruneAfterDeletions(
+    removed.map((entry) => entry.path),
+    managedRoots(ctx, adapters),
+  );
+
+  // 空目录只能报告、不能删：`~/.trae/rules` 这类是工具原生的规则目录，
+  // 我们从没建过它，删了就是动用户的目录。分不清"谁建的"时，宁可多说一句。
+  // 只报选定工具里我们真删过文件的根：uninstall 遍历全注册表，
+  // 不过滤会把成员自己机器上原本就有的空目录（如没勾过的工具的 rules 目录）说成"可能是我们建的"。
+  // 目录包含判断不能拼分隔符（root + '/' 在 win32 永远匹配不上反斜杠路径），用 relative 判。
+  const touchedRoots = managedRoots(ctx, adapters).filter((root) =>
+    removed.some((entry) => {
+      const rel = relative(root, entry.path);
+      return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+    }),
+  );
+  const emptyRoots = touchedRoots.filter(
+    (root) => existsSync(root) && readdirSync(root).length === 0,
+  );
+
+  ctx.out('');
+  ctx.out(
+    `清理完成：删除 ${removed.length} 个由 ejdrone 投递的文件及其记账` +
+      (stripped.length > 0 ? `；撤掉 ${stripped.length} 处团队区块（文件与你写在标记外的内容保留）` : ''),
+  );
+  for (const item of kept) ctx.out(`  保留 ${item.entry.path}（${item.entry.resource}：${item.reason}）`);
+  for (const path of blankBlockFiles) {
+    ctx.out(`  留下空白文件 ${path}（只为团队区块而存在，标记外没有你的内容；确认无用可自行删除）`);
+  }
+  for (const root of emptyRoots) {
+    ctx.out(`  留下空目录 ${root}（可能是我们建的，也可能本来就是工具的空目录；确认无用可自行删除）`);
+  }
+  ctx.out(`config 保留在 ${configPath(ctx.env)}；要彻底移除本工具状态请手动删除该目录，npm 包由 npm uninstall 负责`);
+  return 0;
+}
