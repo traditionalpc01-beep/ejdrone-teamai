@@ -110,6 +110,12 @@
   里（判据是 `core/knowledge.ts` 的 `isKnowledgePath`）。它不在任何工具目录下，适配器 `ownsPath` 天生覆盖不到，
   少接一处 `apply.ts` 的删除分支就一路跳过 —— 表现是"文件与账本永久滞留"，不是报错，测试里以
   `test/integration/knowledge.test.ts` 的「停用 namespace 后那份镜像副本被删除」为哨兵。
+- tags 标签订阅（2.1，设计在 `docs/superpowers/specs/2026-10-14-tags-subscription-design.md`，它推翻了
+  1.0 设计的非目标表）：活跃判定（根 ∪ 角色 ns ∪ 已订阅标签）只收口在 `core/plan.ts` 的
+  `isResourceActive` 一个谓词，`resolveKind` / `list` / `doctor` 都走它，任何地方不许再写一份过滤；
+  标签只做加法豁免，不参与替换/冲突方向（同名裁决语义与无标签时逐字相同）。mcp 条目的 `tags` 与
+  `tools`/`requires` 同为纯下发过滤器：不进渲染文本，反向采集的 keep 列表必须含它。
+  坏形状标签（非字符串数组）在采集与 push 两处都要点名，不许静默忽略。
 - 子 Agent 的能力有无同样只由 `paths.ts` 的 `agentsSubdir`/`agentsFormat` 决定（无落点的 6 个工具不实现
   `planAgents`），四种形态的转换只在 `agents/agentfmt.ts` 一处，公共投递只在 `common.ts` 的 `planAgentsFor`，
   适配器与投递层都不许按工具 id 分支。`planAgents` 带 `note` 通道：坏 frontmatter「保留原文投递」必须点名。

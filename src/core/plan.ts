@@ -85,9 +85,36 @@ function sourcePath(kind: ResourceKind, namespace: string, name: string): string
   return namespace === '' ? `${root}/${name}` : `${root}/${namespace}/${name}`;
 }
 
-function resolveKind(kind: ResourceKind, resources: Resource[], active: Set<string>): KindResult {
-  // 候选 = 根条目 ∪ 活跃 namespace 条目；非活跃 namespace 一律排除。
-  const candidates = resources.filter((r) => r.namespace === '' || active.has(r.namespace));
+/**
+ * 一条资源对「根目录 ∪ 活跃 namespace ∪ 已订阅标签」是否活跃（2.1）。
+ * 裁决（resolveKind）、展示（list）、体检（doctor）共用这一个谓词 ——
+ * 三处各写一遍过滤，迟早出现「投了却显示不投」的分叉。
+ */
+export function isResourceActive(
+  resource: Resource,
+  activeNamespaces: ReadonlySet<string>,
+  activeTags: ReadonlySet<string>,
+): boolean {
+  if (resource.namespace === '') return true;
+  if (activeNamespaces.has(resource.namespace)) return true;
+  if (activeTags.size > 0 && resource.tags !== undefined) {
+    for (const tag of resource.tags) {
+      if (activeTags.has(tag)) return true;
+    }
+  }
+  return false;
+}
+
+function resolveKind(
+  kind: ResourceKind,
+  resources: Resource[],
+  active: Set<string>,
+  activeTags: ReadonlySet<string>,
+): KindResult {
+  // 候选 = 根条目 ∪ 活跃 namespace 条目 ∪ 带已订阅标签的条目（跨 namespace 豁免）。
+  // 非活跃且未命中标签的 namespace 条目一律排除。标签不改变替换/冲突方向：
+  // 同名分组里两个不同来源的 ns（角色激活 + 标签激活也算）依旧冲突停发。
+  const candidates = resources.filter((r) => isResourceActive(r, active, activeTags));
 
   if (KIND_SEMANTICS[kind] === 'union') {
     return { items: sortResources(candidates), conflicts: [], conflicted: false };
@@ -141,12 +168,13 @@ function sortResources(items: Resource[]): Resource[] {
 
 export function resolve(input: ResolveInput): Resolution {
   const active = new Set(input.activeNamespaces);
+  const activeTags = new Set(input.activeTags ?? []);
   const kinds = emptyKinds();
   const conflicts: string[] = [];
   const haltedKinds: ResourceKind[] = [];
 
   for (const kind of RESOURCE_KINDS) {
-    const result = resolveKind(kind, input.kinds[kind] ?? [], active);
+    const result = resolveKind(kind, input.kinds[kind] ?? [], active, activeTags);
     conflicts.push(...result.conflicts);
     if (result.conflicted) {
       haltedKinds.push(kind);

@@ -37,6 +37,15 @@ describe('README 模板', () => {
     expect(text).toMatch(/namespace/);
   });
 
+  it('2.1：标签订阅小节教成员跨角色用个别条目，而不是新建 namespace', () => {
+    const text = teamReadme(REPO, 'main');
+    expect(text).toContain('## 标签订阅');
+    expect(text).toContain('tags: [ops-tools]');
+    expect(text).toContain('ejdrone tags list');
+    expect(text).toContain('ejdrone tags subscribe');
+    expect(text).toContain('多角色共用的内容（比如开发和运维都要用的工具）也放根目录');
+  });
+
   it('交代投递落点与退出方式，并提醒不要把密钥写进技能', () => {
     const text = teamReadme(REPO, 'main');
     expect(text).toContain('ejdrone uninstall');

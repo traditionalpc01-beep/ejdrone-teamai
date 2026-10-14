@@ -36,6 +36,8 @@ const serverEntrySchema = z
     env: z.record(z.string()).optional(),
     requires: z.array(z.string()).optional(),
     tools: z.array(z.string()).optional(),
+    // 2.1 标签订阅：纯下发过滤器（语义同 tools/requires），不进渲染后的成员条目文本
+    tags: z.array(z.string()).optional(),
   })
   .strict()
   .superRefine((entry, ctx) => {
@@ -65,6 +67,7 @@ function toServerDef(e: ServerEntry): McpServerDef {
   if (e.env !== undefined) def.env = e.env;
   if (e.requires !== undefined) def.requires = e.requires;
   if (e.tools !== undefined) def.tools = e.tools;
+  if (e.tags !== undefined) def.tags = e.tags;
   return def;
 }
 
@@ -132,12 +135,16 @@ function parseMcpFile(absPath: string, relPath: string, namespace: string): McpC
       }
       continue;
     }
+    const def = toServerDef(parsed.data);
     servers.push({
       kind: 'mcp',
       namespace,
       name: parsed.data.name,
       files: {},
-      payload: toServerDef(parsed.data),
+      payload: def,
+      // 条目上的 tags 同时提升到 Resource.tags：裁决层（plan.ts）只认 Resource.tags，
+      // 一处来源 lifting 比让裁决层去解 mcpPayload 少一条分派路径。
+      ...(def.tags ? { tags: def.tags } : {}),
     });
   }
 
@@ -264,6 +271,8 @@ export function resolveServerDef(def: McpServerDef, env: NodeJS.ProcessEnv): Res
   if (def.env !== undefined) resolved.env = record(def.env);
   if (def.requires !== undefined) resolved.requires = def.requires.map(s);
   if (def.tools !== undefined) resolved.tools = def.tools.map(s);
+  // tags 是已验证的标识符，不含 ${VAR}；原样透传
+  if (def.tags !== undefined) resolved.tags = def.tags;
   return { resolved, missing };
 }
 

@@ -17,6 +17,8 @@
 
 角色（全员 / 前端 / 运维…）由 `manifest/roles.yaml` 决定谁拿到哪部分：共享内容放根目录，
 差异化内容放 `skills/<ns>/` 这类 namespace 子目录。同一内容误放进激活的 namespace 会被下发两份。
+个别条目要跨角色共用（如开发也要用某个运维工具）时给**条目**打标签，成员按需 `tags subscribe`，
+不必为角色子集新建 namespace。
 
 ## 安装
 
@@ -142,6 +144,9 @@ DeepSeek Harness、Pi、OpenClaw、Trae、Trae CN、Hermes 没有用户级 agent
 | `contribute --file <path> [--title t] [--ns ns] [--dry-run]` | 把踩坑记录沉淀成 learning 并走 MR 入库 |
 | `roles list\|set <id> [--add ids]` | 本地订阅哪些角色 |
 | `roles add\|remove <id>` | 管理员改团队 manifest（走 MR） |
+| `tags list` | 仓库里的标签（来源与条数）与本地订阅 |
+| `tags subscribe\|unsubscribe <tags...>` | 订阅/退订标签：带标条目跨 namespace 额外下发（只改本地 config） |
+| `tags add\|remove <kind> <名字> <tags...> [--ns ns]` | 管理员给条目打标/去标（frontmatter 或 mcp 条目字段，走 MR） |
 | `remove <kind> <name...>` | 从**仓库**删除资源（走 MR）。本地副本不动，合入后 `pull` 自动移除 |
 | `readme` | 生成/更新团队仓库首页 README，并带上两份内置技能 |
 | `doctor [--json]` | 体检：config / 仓库 / manifest / hook / 投递记账 / MCP 四项 |

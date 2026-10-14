@@ -26,6 +26,7 @@ const ENTRY_KEYS = [
   'env',
   'requires',
   'tools',
+  'tags',
 ] as const;
 
 /** 一个 server 的条目在仓库文件里的书写形状（`def` → YAML 映射的键值表）。 */
@@ -46,6 +47,7 @@ export function defToEntry(name: string, def: McpServerDef): Record<string, unkn
   if (def.timeoutMs !== undefined) out.timeout = def.timeoutMs;
   if (def.requires && def.requires.length > 0) out.requires = [...def.requires];
   if (def.tools && def.tools.length > 0) out.tools = [...def.tools];
+  if (def.tags && def.tags.length > 0) out.tags = [...def.tags];
   return out;
 }
 
@@ -166,6 +168,49 @@ export interface RemoveEdit extends RepoEdit {
   notFound: string[];
   /** 删完 servers 空了：调用方应把整个文件走删除（照 remove.ts 删文件的写法） */
   emptied: boolean;
+}
+
+export interface TagEdit extends RepoEdit {
+  /** 编辑前的标签（新条目上是空数组）；文案层用来报「加了什么、删了什么」 */
+  before: string[];
+  /** false = 目标状态与现状一致，无需提交 */
+  changed: boolean;
+}
+
+/**
+ * 就地改一条 server 的 tags 字段（管理员 `tags add/remove` 用），其余键与注释字节不动。
+ * tags 为 null 或空数组 = 删除该键。条目不存在或值不是字符串数组 → 拒绝改写。
+ */
+export function setMcpEntryTags(file: string, text: string, name: string, tags: string[] | null): TagEdit {
+  const fail = (error: string): TagEdit => ({ ok: false, error, before: [], changed: false });
+  const opened = openServers(text, file);
+  if ('error' in opened) return fail(opened.error);
+  const index = indexOfName(opened.seq, name);
+  if (index < 0) return fail(`${file} 里没有 server「${name}」`);
+  const node = opened.seq.items[index];
+  if (!isMap(node)) return fail(`${file} 里 servers[${index}] 不是映射，本工具不改写它`);
+  const current = node.get('tags', true);
+  const before = isSeq(current)
+    ? current.items
+        .map((item) => (isScalar(item) && typeof item.value === 'string' ? (item.value as string) : null))
+        .filter((v): v is string => v !== null)
+    : current === undefined || current === null
+      ? []
+      : null;
+  if (before === null) return fail(`${file} 里 server「${name}」的 tags 不是字符串数组，请先手工修正`);
+  const wanted = tags !== null && tags.length > 0 ? tags : null;
+  const same =
+    (wanted === null && before.length === 0) ||
+    (wanted !== null && wanted.length === before.length && wanted.every((t, i) => t === before[i]));
+  if (same) return { ok: true, text, before, changed: false };
+  if (wanted === null) node.delete('tags');
+  else node.set('tags', opened.doc.createNode(wanted));
+  return {
+    ok: true,
+    text: opened.doc.toString({ lineWidth: 0, indentSeq: true }),
+    before,
+    changed: true,
+  };
 }
 
 /** 从文件里删掉若干条目（按 name）。一次编辑多个名字，避免逐条重解析。 */

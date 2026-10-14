@@ -420,3 +420,79 @@ describe('roles:conflict / roles:unknown（doctor 的体检盲区补齐）', () 
     expect(report.checks.some((c) => c.id === 'roles:unknown')).toBe(false);
   });
 });
+
+describe('tags:unknown（2.1：订阅的标签仓库无人使用）', () => {
+  /** 复用上面的 origin 形状：be ns 里放一条带 ops-tools 标签的 skill。 */
+  function seedTaggedOrigin(state: string): string {
+    const gitHome = join(root, 'git-home');
+    mkdirSync(gitHome, { recursive: true });
+    writeFileSync(join(gitHome, 'gitconfig'), '', 'utf8');
+    const git = (cwd: string, ...args: string[]): string =>
+      execFileSync('git', args, {
+        cwd,
+        encoding: 'utf8',
+        env: { HOME: gitHome, GIT_CONFIG_GLOBAL: join(gitHome, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' },
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+
+    const origin = join(state, 'origin.git');
+    mkdirSync(origin, { recursive: true });
+    git(state, 'init', '--bare', '--initial-branch', 'main', origin);
+    const seed = join(state, 'seed');
+    mkdirSync(join(seed, 'manifest'), { recursive: true });
+    mkdirSync(join(seed, 'skills', 'be', 'ops-helper'), { recursive: true });
+    writeFileSync(join(seed, 'manifest', 'roles.yaml'), 'version: 1\nroles:\n  - id: be\n    namespaces:\n      - be\n', 'utf8');
+    writeFileSync(join(seed, 'skills', 'be', 'ops-helper', 'SKILL.md'), '---\nname: ops-helper\ntags: [ops-tools]\n---\n# ops\n', 'utf8');
+    git(seed, 'init', '--initial-branch', 'main', '.');
+    git(seed, 'add', '-A');
+    git(seed, '-c', 'user.name=Seed', '-c', 'user.email=seed@local', 'commit', '-m', 'seed');
+    git(seed, 'remote', 'add', 'origin', origin);
+    git(seed, 'push', 'origin', 'main');
+    git(origin, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+    return origin;
+  }
+
+  it('订阅了仓库无人使用的标签 → WARN；订阅在用的标签 → 不出现', async () => {
+    const env = makeEnv('tags-unknown');
+    const origin = seedTaggedOrigin(env.EJDRONE_HOME as string);
+    saveConfig(
+      {
+        version: 1,
+        repo: origin,
+        provider: 'git',
+        primaryRole: 'be',
+        additionalRoles: [],
+        subscribedTags: ['ops-tools', 'ghost-tag'],
+        agents: ['claude'],
+      },
+      env,
+    );
+
+    const { report } = await runDoctor(env, 'darwin');
+
+    const check = checkOf(report, 'tags:unknown');
+    expect(check.status).toBe('WARN');
+    expect(check.message).toContain('ghost-tag');
+    expect(check.message).not.toContain('ops-tools');
+  });
+
+  it('没有订阅任何标签时检查不出现（2.0 成员输出逐字节不变）', async () => {
+    const env = makeEnv('tags-none');
+    const origin = seedTaggedOrigin(env.EJDRONE_HOME as string);
+    saveConfig(
+      {
+        version: 1,
+        repo: origin,
+        provider: 'git',
+        primaryRole: null,
+        additionalRoles: [],
+        subscribedTags: [],
+        agents: ['claude'],
+      },
+      env,
+    );
+
+    const { report } = await runDoctor(env, 'darwin');
+    expect(report.checks.some((c) => c.id === 'tags:unknown')).toBe(false);
+  });
+});

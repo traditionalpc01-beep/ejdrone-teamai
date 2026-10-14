@@ -105,6 +105,8 @@ const configSchema = z
     gitlabBaseUrl: z.string().min(1).optional(),
     primaryRole: z.string().nullable(),
     additionalRoles: z.array(z.string().min(1)),
+    // 2.1 标签订阅。default([])：2.0 的 config 没有该键，缺键不报错（strict 只拒多出的键）
+    subscribedTags: z.array(z.string().min(1)).default([]),
     agents: z.array(z.string().min(1)),
   })
   .strict();
@@ -175,6 +177,7 @@ function stringifyConfig(config: Config): string {
   if (config.gitlabBaseUrl !== undefined) doc.gitlabBaseUrl = config.gitlabBaseUrl;
   doc.primaryRole = config.primaryRole;
   doc.additionalRoles = config.additionalRoles;
+  doc.subscribedTags = config.subscribedTags;
   doc.agents = config.agents;
   return `${stringify(doc)}\n`;
 }

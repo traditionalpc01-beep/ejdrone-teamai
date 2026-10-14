@@ -222,6 +222,8 @@ export async function initCommand(ctx: CliContext, repo: string | undefined, opt
     provider: providerForRepo(url, options.provider),
     primaryRole,
     additionalRoles,
+    // 标签订阅不进 init 向导：默认空订阅，成员用 ejdrone tags subscribe 按需加
+    subscribedTags: [],
     agents: adapters.map((a) => a.id),
   };
   saveConfig(config, ctx.env);

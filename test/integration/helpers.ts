@@ -340,6 +340,26 @@ export function seedLearnings(h: Harness): void {
 }
 
 /**
+ * 2.1（标签订阅）：往标准仓库追加带标条目 —— be ns 里一条带 ops-tools 标签的 skill、
+ * 一条同 ns 未带标的对照、一条带标 rule，以及 be ns 的 MCP 文件（含带标 server）。
+ * 与 seedMcp/seedDocs 同理单独成函数：不塞 seedTeamRepo，不波及既有断言。
+ * 注意它独占 `mcp/be/mcp.yaml`：与 seedMcp 不能同仓使用（后者写同一文件）。
+ */
+export function seedTags(h: Harness): void {
+  h.writeSeed(
+    'skills/be/ops-helper/SKILL.md',
+    '---\nname: ops-helper\ndescription: 运维助手\ntags: [ops-tools]\n---\n\n# Ops helper\n\n跨角色共用的运维工具。\n',
+  );
+  h.writeSeed('skills/be/ops-plain/SKILL.md', '# Ops plain\n\n同 ns 未带标，标签订阅不该把它带出来。\n');
+  h.writeSeed('rules/be/ops-runbook.md', '---\ntags: [ops-tools]\n---\n\n# Ops runbook\n\n带标的运维 rule。\n');
+  h.writeSeed(
+    'mcp/be/mcp.yaml',
+    ['servers:', '  - name: ops-relay', '    transport: stdio', '    command: npx', '    tags: [ops-tools]', ''].join('\n'),
+  );
+  h.commitSeed('seed tagged entries');
+}
+
+/**
  * 伪造 HOME 下要"探测到"这些工具，就得先有它们的根目录。
  * 根目录名一律取自 paths.ts 的表 —— 硬编码表会在新增工具时静默回落成 `.<id>`，
  * 于是测试"装了"而适配器看的是另一个目录。

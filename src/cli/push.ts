@@ -13,6 +13,7 @@ import { collectMcpDefs, type McpCollectedItem } from './mcpcollect.js';
 import { defToEntry, mcpRepoFile, upsertMcpServer } from './mcprepo.js';
 import { candidateKey, readTree, scanLocalAgents } from './local.js';
 import { submitMrChange, type MrChange } from './mr.js';
+import { readFrontmatterTags } from '../core/resources.js';
 import { openSnapshot, type Snapshot } from './snapshot.js';
 
 export interface PushOptions {
@@ -69,6 +70,17 @@ export function buildTargets(
       };
     }
     const copy: Resource = { ...resource, namespace };
+    // 标签形状提前点名：仓库里能订阅的前提是 tags 是字符串数组，坏形状入仓等于埋一颗
+    // 「订阅了却不生效」的雷（采集层同样会忽略它，但那要等别人 pull 时才看到）。
+    {
+      const tagWarnings: string[] = [];
+      readFrontmatterTags(
+        copy.files[copy.kind === 'skills' ? 'SKILL.md' : 'content'] ?? '',
+        `${copy.kind}/${copy.name}`,
+        tagWarnings,
+      );
+      for (const warning of tagWarnings) ctx.out(`提示：${warning}`);
+    }
     if (copy.kind === 'skills') {
       const done = completeFrontmatter(copy.files['SKILL.md'] ?? '', copy.name);
       if (done.changed) ctx.out(`提示：已为 ${copy.name}/SKILL.md 补全 frontmatter`);
@@ -146,9 +158,9 @@ function editMcpFile(
 
   for (const item of items) {
     const entry = defToEntry(item.name, item.def);
-    // tools / requires 是仓库侧的下发过滤器，本机文件里没有这个概念：就地更新时必须留下，
+    // tools / requires / tags 是仓库侧的下发过滤器，本机文件里没有这个概念：就地更新时必须留下，
     // 否则重新 push 一条已在库的 server 会顺手把团队的过滤条件抹掉。
-    const edited = upsertMcpServer(file, text, entry, ['tools', 'requires']);
+    const edited = upsertMcpServer(file, text, entry, ['tools', 'requires', 'tags']);
     if (!edited.ok || edited.text === undefined) {
       return { files, listed, error: edited.error ?? '未知错误' };
     }

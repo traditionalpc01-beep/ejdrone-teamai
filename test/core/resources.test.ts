@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { collectResources, completeFrontmatter } from '../../src/core/resources.js';
+import { collectResources, completeFrontmatter, readFrontmatterTags, setFrontmatterTags } from '../../src/core/resources.js';
 import type { RolesManifest } from '../../src/core/types.js';
 
 let root = '';
@@ -254,5 +254,73 @@ describe('completeFrontmatter', () => {
     expect(res.changed).toBe(true);
     expect(res.content).toContain('name: empty-fm');
     expect(res.content).toContain('description: Desc here.');
+  });
+});
+
+describe('readFrontmatterTags / setFrontmatterTags（2.1）', () => {
+  const warn: string[] = [];
+
+  it('读出字符串数组标签；无 frontmatter / 无 tags 键 → undefined', () => {
+    expect(readFrontmatterTags('---\nname: a\ntags: [ops, ci]\n---\nbody', 'x', warn)).toEqual(['ops', 'ci']);
+    expect(readFrontmatterTags('---\nname: a\n---\nbody', 'x', warn)).toBeUndefined();
+    expect(readFrontmatterTags('no frontmatter', 'x', warn)).toBeUndefined();
+    expect(readFrontmatterTags('---\ntags: []\n---\nbody', 'x', warn)).toBeUndefined();
+  });
+
+  it('坏形状不致命：点名并当作无标签', () => {
+    const warnings: string[] = [];
+    expect(readFrontmatterTags('---\ntags: ops\n---\nbody', 'skills/a', warnings)).toBeUndefined();
+    expect(warnings.join('\n')).toContain('skills/a 的 tags 不是字符串数组');
+    const mixed: string[] = [];
+    expect(readFrontmatterTags('---\ntags: [ops, 3]\n---\nbody', 'b', mixed)).toBeUndefined();
+    expect(mixed).toHaveLength(1);
+  });
+
+  it('setFrontmatterTags 设值/删键，其余键与正文原样保留；无变化 changed=false', () => {
+    const input = '---\nname: a\ndescription: keep\n---\nBODY';
+    const set = setFrontmatterTags(input, ['ops', 'ci']);
+    expect(set.changed).toBe(true);
+    expect(set.content).toContain('name: a');
+    expect(set.content).toContain('description: keep');
+    expect(set.content).toContain('tags:');
+    expect(set.content).toContain('BODY');
+    // 幂等：再次设同一值不动文件
+    expect(setFrontmatterTags(set.content, ['ops', 'ci']).changed).toBe(false);
+    // remove 到空 → 删除键
+    const removed = setFrontmatterTags(set.content, null);
+    expect(removed.changed).toBe(true);
+    expect(removed.content).not.toContain('tags:');
+    expect(removed.content).toContain('description: keep');
+  });
+
+  it('没有 frontmatter 的文件加标签会新建只含 tags 的块', () => {
+    const res = setFrontmatterTags('# Body\n', ['ops']);
+    expect(res.changed).toBe(true);
+    expect(res.content.startsWith('---\n')).toBe(true);
+    expect(res.content).toContain('tags:');
+    expect(res.content).toContain('# Body');
+  });
+});
+
+describe('collectResources × tags 提升', () => {
+  it('skills（根与 ns）、rules、docs 的 frontmatter tags 进 Resource.tags', () => {
+    const base = tmp();
+    file(base, 'skills/root-skill/SKILL.md', '---\nname: root-skill\ntags: [ci]\n---\n# Root\n');
+    file(base, 'skills/be/be-deploy/SKILL.md', '---\nname: be-deploy\ntags: [ops]\n---\n# Deploy\n');
+    file(base, 'skills/be/be-plain/SKILL.md', '---\nname: be-plain\n---\n# Plain\n');
+    file(base, 'rules/be/db.md', '---\ntags: [ops, db]\n---\n规则正文');
+    file(base, 'docs/be/runbook.md', '---\ntags: [ops]\n---\n# Runbook\n');
+    const res = collectResources(base, manifestWith('be'));
+    expect(res.kinds.skills.find((r) => r.name === 'root-skill')?.tags).toEqual(['ci']);
+    expect(res.kinds.skills.find((r) => r.name === 'be-deploy')?.tags).toEqual(['ops']);
+    expect(res.kinds.skills.find((r) => r.name === 'be-plain')?.tags).toBeUndefined();
+    expect(res.kinds.rules.find((r) => r.name === 'db')?.tags).toEqual(['ops', 'db']);
+    expect(res.kinds.docs.find((r) => r.name === 'be/runbook')?.tags).toEqual(['ops']);
+    // 坏形状：采集层点名（不静默）
+    const bad = tmp();
+    file(bad, 'skills/bad-tagger/SKILL.md', '---\ntags: not-a-list\n---\n# X\n');
+    const badRes = collectResources(bad, null);
+    expect(badRes.kinds.skills[0]?.tags).toBeUndefined();
+    expect(badRes.warnings.join('\n')).toContain('skills/bad-tagger 的 tags 不是字符串数组');
   });
 });

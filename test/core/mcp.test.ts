@@ -12,6 +12,7 @@ import {
 import { collectResources } from '../../src/core/resources.js';
 import { resolve } from '../../src/core/plan.js';
 import { emptyKinds, type Resource } from '../../src/core/types.js';
+import { resolveServerDef } from '../../src/core/mcp.js';
 
 let root = '';
 afterEach(() => {
@@ -475,5 +476,76 @@ describe('referencesEnvVar：哪些条目算"含已解析值"', () => {
       expect(referencesEnvVar({ transport: 'stdio', command: 'run', env: { K: '${V}' } } as never)).toBe(true);
       expect(referencesEnvVar({ transport: 'stdio', command: 'run ${BIN}' } as never)).toBe(true);
     }
+  });
+});
+
+describe('collectMcp × 标签订阅（2.1）', () => {
+  it('条目 tags 进 payload 与 Resource.tags（提升到裁决层认的字段）', () => {
+    const base = tmp();
+    file(
+      base,
+      'mcp/mcp.yaml',
+      yaml(
+        'servers:',
+        '  - name: ops-tool',
+        '    transport: stdio',
+        '    command: npx',
+        '    tags: [ops-tools]',
+      ),
+    );
+    const res = collectMcp(base, new Set());
+    const server = res.servers[0];
+    expect(server?.payload?.tags).toEqual(['ops-tools']);
+    expect(server?.tags).toEqual(['ops-tools']);
+  });
+
+  it('tags 不是字符串数组 → 条目级失败（跳过该条并点名），其余条目照常', () => {
+    const base = tmp();
+    file(
+      base,
+      'mcp/mcp.yaml',
+      yaml(
+        'servers:',
+        '  - name: bad-tags',
+        '    transport: stdio',
+        '    command: npx',
+        '    tags: ops',
+        '  - name: fine',
+        '    transport: stdio',
+        '    command: npx',
+      ),
+    );
+    const res = collectMcp(base, new Set());
+    expect(res.servers.map((s) => s.name)).toEqual(['fine']);
+    expect(res.warnings.join('\n')).toContain('bad-tags');
+    expect(res.warnings.join('\n')).toContain('tags');
+  });
+
+  it('resolveServerDef 透传 tags（标识符不含 ${VAR}，不需要解析）', () => {
+    const { resolved } = resolveServerDef(
+      { transport: 'stdio', command: 'npx', tags: ['ops-tools'] },
+      {},
+    );
+    expect(resolved.tags).toEqual(['ops-tools']);
+  });
+
+  it('条目标签参与裁决：订阅后跨 namespace 下发（e2e 语义在 integration/tags.test.ts）', () => {
+    const base = tmp();
+    file(
+      base,
+      'mcp/be/mcp.yaml',
+      yaml(
+        'servers:',
+        '  - name: ops-server',
+        '    transport: stdio',
+        '    command: npx',
+        '    tags: [ops-tools]',
+      ),
+    );
+    const kinds = emptyKinds();
+    const collected = collectMcp(base, new Set(['be']));
+    kinds.mcp = collected.servers;
+    const res = resolve({ kinds, activeNamespaces: ['fe'], activeTags: ['ops-tools'] });
+    expect(res.kinds.mcp.map((s) => s.name)).toEqual(['ops-server']);
   });
 });

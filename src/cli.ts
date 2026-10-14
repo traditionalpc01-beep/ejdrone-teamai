@@ -20,6 +20,7 @@ import { readmeCommand } from './cli/readme.js';
 import { removeCommand, type RemoveOptions } from './cli/remove.js';
 import { rolesAdd, rolesList, rolesRemove, rolesSet, type RolesAddOptions, type RolesSetOptions } from './cli/roles.js';
 import { statusCommand } from './cli/status.js';
+import { tagsChange, tagsList, tagsSubscribe, tagsUnsubscribe, type TagsChangeOptions } from './cli/tags.js';
 import { uninstallCommand, type UninstallOptions } from './cli/uninstall.js';
 
 // 版本只有一个来源：package.json。写死会让 `ejdrone --version` 在发版后继续报旧号，
@@ -169,6 +170,46 @@ export async function runCli(argv: string[], input: CliContextInput = {}): Promi
     .description('管理员：从 manifest 移除角色并开 MR')
     .argument('[id]', '角色 id')
     .action(guard(async (id: string | undefined) => rolesRemove(ctx, id)));
+
+  const tags = program.command('tags').description('标签：订阅跨 namespace 的条目；管理员给仓库条目打标');
+  tags
+    .command('list')
+    .description('显示仓库里的标签（来源与条数）与本地订阅')
+    .action(guard(async () => tagsList(ctx)));
+  tags
+    .command('subscribe')
+    .description('订阅标签：pull 时带标条目跨 namespace 额外下发（只改本地 config）')
+    .argument('<tags...>', '标签名，空格或逗号分隔')
+    .action(guard(async (list: string[]) => tagsSubscribe(ctx, list)));
+  tags
+    .command('unsubscribe')
+    .description('退订标签：pull 会撤走只因此标签下发的条目')
+    .argument('<tags...>', '标签名，空格或逗号分隔')
+    .action(guard(async (list: string[]) => tagsUnsubscribe(ctx, list)));
+  tags
+    .command('add')
+    .description('管理员：给仓库条目加标签（frontmatter / mcp 条目字段）并开 MR')
+    .argument('<kind>', `资源类型（${kindHelp()}）`)
+    .argument('<name>', '条目名（docs/learnings 含 namespace 段）')
+    .argument('<tags...>', '标签名')
+    .option('--ns <namespace>', '同名条目分布在根与多个 namespace 时挑一份（根条目用 --ns root）')
+    .action(
+      guard(async (kind: string, name: string, list: string[], options: TagsChangeOptions) =>
+        tagsChange(ctx, 'add', kind, name, list, options),
+      ),
+    );
+  tags
+    .command('remove')
+    .description('管理员：从仓库条目移除标签并开 MR')
+    .argument('<kind>', `资源类型（${kindHelp()}）`)
+    .argument('<name>', '条目名（docs/learnings 含 namespace 段）')
+    .argument('<tags...>', '标签名')
+    .option('--ns <namespace>', '同名条目分布在根与多个 namespace 时挑一份（根条目用 --ns root）')
+    .action(
+      guard(async (kind: string, name: string, list: string[], options: TagsChangeOptions) =>
+        tagsChange(ctx, 'remove', kind, name, list, options),
+      ),
+    );
 
   program
     .command('remove')
