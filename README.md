@@ -23,7 +23,12 @@
 前置：Node.js ≥ 20 与 git；Windows 另需 [Git for Windows](https://git-scm.com/download/win)。
 
 ```bash
-npm install -g ejdrone-skills    # 团队内网 npm 源
+# 1) 指向团队内网 npm 源（云效制品库，代理 npmmirror，公共包同样可装）
+npm config set registry https://packages.aliyun.com/64084f5656067d3aad3e0d11/npm/npm-registry/
+# 2) 首次使用：浏览器登录 packages.aliyun.com 打开上面地址，按页面「指引」里
+#    你自己的 npm 凭据，写进 ~/.npmrc（凭据每人一份，不要共用）
+# 3) 安装
+npm install -g ejdrone-skills
 ejdrone --version                # 打印版本号即安装成功
 ```
 

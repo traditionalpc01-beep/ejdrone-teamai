@@ -67,10 +67,15 @@ export function teamReadme(repo: string, branch: string): string {
 ## 成员：怎么加入
 
 \`\`\`bash
-npm install -g ejdrone-skills        # 或从团队内网 npm 源安装
+npm config set registry https://packages.aliyun.com/64084f5656067d3aad3e0d11/npm/npm-registry/
+npm install -g ejdrone-skills
 ejdrone init ${repo}
 ejdrone doctor                       # 逐项体检，全绿即完成
 \`\`\`
+
+安装走**团队内网 npm 源**（云效制品库，代理 npmmirror，公共包同样可装）。首次使用请在浏览器
+登录 packages.aliyun.com 打开上面这个源地址，按页面「指引」把**你自己**的 npm 凭据写进
+\`~/.npmrc\` —— 凭据每人一份，不要共用，也不要发给任何人。
 
 \`init\` 会让你勾选自己在用的 AI 工具、选择自己的角色。完成后每次开 AI 会话都会自动同步，
 不需要手动 \`pull\`，也不需要任何人通知你"有新东西了"。
