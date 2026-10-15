@@ -4,7 +4,6 @@
   "description": "Git-native team skills/rules sync with role-based distribution for AI coding agents",
   "type": "module",
   "license": "UNLICENSED",
-  "private": true,
   "bin": {
     "ejdrone": "dist/cli.js"
   },
