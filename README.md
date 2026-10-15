@@ -23,14 +23,15 @@
 前置：Node.js ≥ 20 与 git；Windows 另需 [Git for Windows](https://git-scm.com/download/win)。
 
 ```bash
-# 1) 指向团队内网 npm 源（云效制品库，代理 npmmirror，公共包同样可装）
-npm config set registry https://packages.aliyun.com/64084f5656067d3aad3e0d11/npm/npm-registry/
-# 2) 首次使用：浏览器登录 packages.aliyun.com 打开上面地址，按页面「指引」里
-#    你自己的 npm 凭据，写进 ~/.npmrc（凭据每人一份，不要共用）
-# 3) 安装
-npm install -g ejdrone-skills
+# 从 Codeup 源码仓直装：复用你克隆团队仓库的同一份 git 凭据，无需配置 npm 源
+npm install -g "git+https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-skills.git#v2.0.2"
 ejdrone --version                # 打印版本号即安装成功
 ```
+
+升级 = 换新 tag 重装同一条命令（`#v2.0.3` …）。
+备用通道（CI / 无法走 git 时）：云效制品库 npm 源
+`npm config set registry https://packages.aliyun.com/64084f5656067d3aad3e0d11/npm/npm-registry/`
+后 `npm install -g ejdrone-skills`；首次使用需在制品库页面取个人 npm 凭据写进 `~/.npmrc`。
 
 Windows 的会话自动 pull 依赖 Git for Windows 的 bash；没装时 hook 不安装（`init` 会提示），
 手动 `ejdrone pull` 不受影响。
