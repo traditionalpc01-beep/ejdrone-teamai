@@ -36,6 +36,9 @@ const serverEntrySchema = z
     env: z.record(z.string()).optional(),
     requires: z.array(z.string()).optional(),
     tools: z.array(z.string()).optional(),
+    // 团队给 server 打的分类标签（2026-10-15 真实成员环境引出）：仓库侧元数据，供人/AI 浏览清单用，
+    // 不进任何工具的 MCP 配置——strict 模式下不认识它会把整条 server 跳过。
+    tags: z.array(z.string()).optional(),
   })
   .strict()
   .superRefine((entry, ctx) => {

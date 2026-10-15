@@ -45,6 +45,26 @@ function humanText(parts: Array<string[] | string | null>): string {
 }
 
 describe('collectMcp: 合法文件', () => {
+  it('tags 是仓库侧元数据：条目照常收下，不落进 server 定义', () => {
+    const base = tmp();
+    file(
+      base,
+      'mcp/mcp.yaml',
+      yaml(
+        'servers:',
+        '  - name: codegraph',
+        '    transport: stdio',
+        '    command: codegraph',
+        '    tags: [code-analysis]',
+      ),
+    );
+    const res = collectMcp(base, new Set());
+    expect(res.fileError).toBeNull();
+    expect(res.warnings).toEqual([]);
+    expect(res.servers.map((s) => s.name)).toEqual(['codegraph']);
+    expect(res.servers[0]?.payload).not.toHaveProperty('tags');
+  });
+
   it('解析 stdio 与 http 两条 server 为 Resource，字段原样保留', () => {
     const base = tmp();
     file(
