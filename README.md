@@ -24,7 +24,7 @@
 
 ```bash
 # 从 Codeup 源码仓直装：复用你克隆团队仓库的同一份 git 凭据，无需配置 npm 源
-npm install -g "git+https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-skills.git#v2.0.2"
+npm install -g "git+https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-skills.git#v2.0.3"
 ejdrone --version                # 打印版本号即安装成功
 ```
 
