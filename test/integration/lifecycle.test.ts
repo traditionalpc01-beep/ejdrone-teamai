@@ -276,6 +276,30 @@ describe('status 与冲突', () => {
     expect(member.exists('.claude', 'rules', 'dev.md')).toBe(true);
   });
 
+  it('仓库没有 rules 时，codex 的合成区块不被 status 计成永久落后（2026-10-15 真实成员环境引出）', async () => {
+    const bare = createHarness();
+    try {
+      bare.writeSeed(
+        'manifest/roles.yaml',
+        'version: 1\nroles:\n  - id: be\n    description: 后端\n    namespaces:\n      - be\n',
+      );
+      bare.writeSeed('skills/solo/SKILL.md', '# Solo\n\n唯一内容，仓库没有任何 rules。\n');
+      bare.commitSeed('skills only, no rules');
+
+      const member = bare.member('codex-norules');
+      installTools(member, ['codex']);
+      const init = await member.run(['init', bare.origin, '--agent', 'codex', '--role', 'be']);
+      expect(init.code, init.all).toBe(0);
+
+      const report = await member.run(['status']);
+      expect(report.code, report.all).toBe(0);
+      expect(report.all).toContain('落后（仓库有、本机还没投递）：0');
+      expect(report.all).not.toContain('rules:team-rules-block');
+    } finally {
+      bare.cleanup();
+    }
+  });
+
   it('两个订阅角色定义同名条目 → 只停 skills、已装内容不被删、退出码 1', async () => {
     const member = h.member('conflict');
     await initMember(member, ['claude']);

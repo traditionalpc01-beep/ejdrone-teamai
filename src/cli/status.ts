@@ -1,5 +1,6 @@
 import { loadLedger } from '../core/ledger.js';
 import { allResources } from '../core/types.js';
+import { BLOCK_RESOURCE_KEY } from '../agents/block.js';
 import { ledgerPath } from '../state.js';
 import type { Config, Ledger } from '../core/types.js';
 import type { CliContext } from './context.js';
@@ -54,6 +55,10 @@ export async function statusCommand(ctx: CliContext): Promise<number> {
   const repoKeys = new Set(
     delivery.writes
       .filter((w) => !(w.merge && Object.keys(w.merge.entries).length === 0))
+      // block 模式的合成键同理（2026-10-15 真实成员环境引出）：仓库没有任何 rules 时它是一条
+      // content 为空的占位写，apply 层刻意不建 AGENTS.md 也不记账，不过滤就成了 pull 永远
+      // 消不掉的一条"落后"。真有 rules 时 content 非空，照常计入。
+      .filter((w) => !(w.resource === BLOCK_RESOURCE_KEY && w.content === ''))
       .map((w) => w.resource),
   );
   const deliveredKeys = new Set(ledger.entries.map((entry) => entry.resource));
