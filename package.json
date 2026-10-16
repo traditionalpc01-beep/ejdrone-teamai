@@ -1,6 +1,6 @@
 {
   "name": "ejdrone-teamai",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Git-native team skills/rules sync with role-based distribution for AI coding agents",
   "type": "module",
   "license": "UNLICENSED",
