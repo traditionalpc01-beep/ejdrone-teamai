@@ -14,7 +14,7 @@ const execFileAsync = promisify(execFile);
  * 都来自配置或用户输入，拼接即注入。
  */
 
-const DEFAULT_AUTHOR_NAME = 'ejdrone-skills';
+const DEFAULT_AUTHOR_NAME = 'ejdrone-teamai';
 const DEFAULT_AUTHOR_EMAIL = 'ejdrone@local';
 
 function gitEnv(env: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {

@@ -67,13 +67,14 @@ export function teamReadme(repo: string, branch: string): string {
 ## 成员：怎么加入
 
 \`\`\`bash
-npm install -g "git+https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-skills.git#v2.0.3"
+npm install -g "git+https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-skills.git#v2.1.1"
 ejdrone init ${repo}
 ejdrone doctor                       # 逐项体检，全绿即完成
 \`\`\`
 
-安装直接从源码仓拉取并本地构建，用的就是你克隆上面这个仓库的同一份 git 凭据 ——
+安装直接从源码仓拉取并本地构建，用的就是你克隆团队仓库的同一份 git 凭据 ——
 不需要配置 npm 源，也不需要任何 npm 凭据。升级时换新 tag 重装同一条命令即可。
+从旧包名 \`ejdrone-skills\` 迁移：先 \`npm uninstall -g ejdrone-skills\` 再装新包。
 
 \`init\` 会让你勾选自己在用的 AI 工具、选择自己的角色。完成后每次开 AI 会话都会自动同步，
 不需要手动 \`pull\`，也不需要任何人通知你"有新东西了"。
@@ -102,11 +103,27 @@ mcp/<ns>/mcp.yaml                  只给某角色的 MCP server 清单
 **这条规矩最重要**：全员共享的放根目录，只给某个角色的才放 namespace。
 同名条目里 namespace 会**整体替换**根目录版本、不做字段合并 —— 把共享内容误写进某个 namespace，
 激活该 namespace 的成员会同时收到两份，其他人一份都收不到。
+多角色共用的内容（比如开发和运维都要用的工具）也放根目录；只有「放在某角色 namespace 里、
+但另一个角色也要用」的个别条目才用标签（见下一节）。
 
 \`skills/ejdrone-recall/\` 与 \`skills/ejdrone-share/\` 是**内置引导技能**：由 \`ejdrone readme\` 随本说明书一起补进仓库
 （前者教 agent 动手前先 \`ejdrone recall\` 检索团队既有做法，后者教它把踩坑沉淀成 learning 交给 \`ejdrone contribute\`）。
 它们进仓库后就是普通根技能，与你们自己写的没有任何区别：成员可删可改，想定制就直接改这两个文件并走 MR。
 \`ejdrone push\` 拒绝用同名条目覆盖仓库里的那份（保留名），就是为了不让某个人本地的改动绕过评审变成全员的教材。
+
+## 标签订阅（跨角色用个别条目）
+
+条目留在某个角色的 namespace 里、但另一个角色也需要时，给**条目**打标签，别挪目录也别建新 namespace：
+
+\`\`\`yaml
+# SKILL.md / rule / agent / doc / learning 的 frontmatter，或 mcp 条目的字段
+tags: [ops-tools]
+\`\`\`
+
+成员按需订阅：\`ejdrone tags list\` 看仓库现有标签 → \`ejdrone tags subscribe ops-tools\` →
+下次 \`pull\` 带这个标签的条目会跨 namespace 额外下发；退订后自动撤走。
+打标/改标走 \`ejdrone tags add <kind> <名字> <标签>\`（开 MR 评审），或直接在仓库里改 frontmatter。
+标签不影响替换与冲突规则，根条目对全员照常下发（标签写了也无效）。
 
 ## 怎么提交新内容
 
@@ -164,6 +181,7 @@ ${deliveryMatrix()}
 ejdrone doctor      # 配置、仓库连通、manifest、hook、投递记账逐项体检
 ejdrone status      # 待推送 / 落后 / 本地已改动的内容
 ejdrone list        # 团队有什么、我这次会拿到什么
+ejdrone tags list   # 仓库标签与我的标签订阅
 cat ~/.ejdrone/debug.log   # 会话自动同步的失败记录
 \`\`\`
 

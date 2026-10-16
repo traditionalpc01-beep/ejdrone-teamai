@@ -1,10 +1,10 @@
 /**
- * ejdrone-skills 跨模块契约 —— 已冻结。
+ * ejdrone-teamai 跨模块契约 —— 已冻结。
  *
  * 三个并行实现方（core / agents / git+state+hooks）都只依赖本文件通信。
  * 若你认为某个签名需要调整：不要就地修改，把理由回报给协调者。
  *
- * 设计文档：docs/superpowers/specs/2026-10-11-ejdrone-skills-design.md
+ * 设计文档：docs/superpowers/specs/2026-10-11-ejdrone-teamai-design.md
  */
 
 // ---------------------------------------------------------------- 资源模型
@@ -37,6 +37,13 @@ export interface Resource {
   namespace: string;
   name: string;
   files: Record<string, string>;
+  /**
+   * 条目上的标签订阅声明（2.1）：文件类资源来自 frontmatter 的 `tags:`，mcp 来自条目的 `tags:` 字段。
+   * 只做**加法豁免**——成员订阅了任一标签时，非活跃 namespace 里带标条目也进候选；
+   * 不参与替换方向（同名 ns 替换根、双 ns 冲突停发的语义与无标签时逐字相同）。
+   * 根条目全员下发，标签写了也无效但无害。
+   */
+  tags?: string[];
   /** 仅 kind === 'mcp' 使用；其他 kind 必须为 undefined。 */
   payload?: McpServerDef;
 }
@@ -57,6 +64,8 @@ export interface McpServerDef {
   requires?: string[];
   /** 只下发给这些工具 id；缺省 = 所有声明了 mcpTarget 的工具 */
   tools?: string[];
+  /** 条目标签（2.1）：成员订阅任一标签即下发该 server（跨 namespace 豁免，语义同 Resource.tags） */
+  tags?: string[];
 }
 
 /** 取 mcp 资源的结构化内容；缺失说明上游装配写错了（内部不变量，直接抛）。 */
@@ -103,6 +112,11 @@ export interface Config {
   gitlabBaseUrl?: string;
   primaryRole: string | null;
   additionalRoles: string[];
+  /**
+   * 本地订阅的标签（2.1）：任一资源（含非活跃 namespace 的）带这些标签即下发。
+   * 旧 config 没有该字段 = 空订阅（state.ts 的 schema 有 default([])）。
+   */
+  subscribedTags: string[];
   /** init 时选定的工具 id 列表；追加不覆盖 */
   agents: string[];
 }
@@ -114,6 +128,8 @@ export interface ResolveInput {
   kinds: KindSet;
   /** primaryRole + additionalRoles 映射出的 namespace 并集 */
   activeNamespaces: string[];
+  /** 本地订阅的标签（2.1）；缺省 = 无标签豁免，行为与 2.0 逐字节相同 */
+  activeTags?: string[];
 }
 
 /**

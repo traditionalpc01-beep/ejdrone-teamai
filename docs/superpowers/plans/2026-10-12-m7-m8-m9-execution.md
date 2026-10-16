@@ -1,6 +1,6 @@
 # M7 / M8 / M9 执行子计划 —— 子 Agent 下发 · 团队知识 · 经验沉淀
 
-> 父计划：`docs/superpowers/plans/2026-10-11-ejdrone-skills-2.0.md`（§2 范围、§3 契约、§7/§7.1 偏差登记为准）。
+> 父计划：`docs/superpowers/plans/2026-10-11-ejdrone-teamai-2.0.md`（§2 范围、§3 契约、§7/§7.1 偏差登记为准）。
 > 本文件把 M7/M8/M9 展开成 bite-sized 任务，是三个执行子代理的**唯一任务清单**。
 > 全程硬规则见根目录 `AGENTS.md`；违反其中任何一条的交付一律退回。
 

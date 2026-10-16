@@ -12,7 +12,7 @@ import { expect } from 'vitest';
  *
  * 因此：POSIX 精确断言；win32 断言「不是只读」（这才是 Windows 上唯一真实存在的权限语义），
  * 并把「明文密钥文件的保护来自 %USERPROFILE% 的 NTFS ACL 继承，不是 POSIX 0600」登记为
- * 有意偏差（见 `docs/superpowers/plans/2026-10-11-ejdrone-skills-2.0.md` §7 与
+ * 有意偏差（见 `docs/superpowers/plans/2026-10-11-ejdrone-teamai-2.0.md` §7 与
  * `docs/trials/2026-10-13-windows-real-trial.md`）。
  */
 export const IS_POSIX = process.platform !== 'win32';

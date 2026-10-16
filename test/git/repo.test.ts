@@ -332,7 +332,7 @@ describe('createBranch / commitAll / push', () => {
     writeFiles(dir, { 'skills/new/SKILL.md': '# new\n' });
     await commitAll(dir, 'ejdrone: push new', env);
 
-    expect(gitAt(dir, 'log', '-1', '--format=%an %ae').trim()).toBe('ejdrone-skills ejdrone@local');
+    expect(gitAt(dir, 'log', '-1', '--format=%an %ae').trim()).toBe('ejdrone-teamai ejdrone@local');
     expect(await isDirty(dir, env)).toBe(false);
   });
 

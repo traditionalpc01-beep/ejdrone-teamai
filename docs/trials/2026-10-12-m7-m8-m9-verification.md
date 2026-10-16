@@ -1,6 +1,6 @@
 # 2026-10-12 · M7/M8/M9 验证记录（子 Agent 下发 · 团队知识 · 经验沉淀）
 
-对应父计划 `docs/superpowers/plans/2026-10-11-ejdrone-skills-2.0.md` §4 的 M7/M8/M9 与
+对应父计划 `docs/superpowers/plans/2026-10-11-ejdrone-teamai-2.0.md` §4 的 M7/M8/M9 与
 §5 的全局门槛。执行子计划是 `2026-10-12-m7-m8-m9-execution.md`。
 与 M5/M6 那两份记录不同，这一轮**没有对你本机做投递试验**，原因写在最后一节，不是漏做。
 

@@ -43,6 +43,7 @@ const base: Config = {
   gitlabBaseUrl: 'https://gitlab.example.com',
   primaryRole: 'devops',
   additionalRoles: ['backend'],
+  subscribedTags: ['ops-tools'],
   agents: ['qoder-cn', 'claude'],
 };
 
@@ -131,6 +132,18 @@ describe('saveConfig / loadConfig', () => {
 
   it('returns { config: null } with no error when the file does not exist', () => {
     expect(loadConfig(env)).toEqual({ config: null });
+  });
+
+  it('2.0 的 config 没有 subscribedTags 键 → 解析为空订阅（缺键不是 strict 的靶子）', () => {
+    mkdirSync(join(home, '.ejdrone'), { recursive: true });
+    writeFileSync(
+      configPath(env),
+      'version: 1\nrepo: r\nprovider: git\nprimaryRole: null\nadditionalRoles: []\nagents: []\n',
+      'utf8',
+    );
+    const result = loadConfig(env);
+    expect(result.error).toBeUndefined();
+    expect(result.config?.subscribedTags).toEqual([]);
   });
 
   it('reports an unknown key instead of silently ignoring it', () => {

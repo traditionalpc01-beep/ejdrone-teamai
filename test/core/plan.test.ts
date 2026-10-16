@@ -1,12 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { activeNamespaces, resolve } from '../../src/core/plan.js';
+import { activeNamespaces, isResourceActive, resolve } from '../../src/core/plan.js';
 import { emptyKinds, type Config, type KindSet, type Resource, type RolesManifest } from '../../src/core/types.js';
 
-function skill(namespace: string, name: string): Resource {
-  return { kind: 'skills', namespace, name, files: { 'SKILL.md': `${namespace || '<root>'}/${name}` } };
+function skill(namespace: string, name: string, tags?: string[]): Resource {
+  return {
+    kind: 'skills',
+    namespace,
+    name,
+    files: { 'SKILL.md': `${namespace || '<root>'}/${name}` },
+    ...(tags ? { tags } : {}),
+  };
 }
 function rule(namespace: string, name: string): Resource {
   return { kind: 'rules', namespace, name, files: { content: `${namespace || '<root>'}/${name}` } };
+}
+function doc(namespace: string, base: string, tags?: string[]): Resource {
+  return {
+    kind: 'docs',
+    namespace,
+    name: namespace === '' ? base : `${namespace}/${base}`,
+    files: { content: `${namespace || '<root>'}/${base}` },
+    ...(tags ? { tags } : {}),
+  };
 }
 function mcp(namespace: string, name: string): Resource {
   return {
@@ -127,12 +142,92 @@ describe('resolve', () => {
   });
 });
 
+describe('resolve × 标签订阅（2.1）', () => {
+  it('订阅的标签把非活跃 namespace 里的带标条目加进候选，同 ns 未带标的仍排除', () => {
+    const res = resolve({
+      kinds: kindsOf({
+        skills: [skill('be', 'deploy', ['ops']), skill('be', 'db-migrate'), skill('', 'shared')],
+      }),
+      activeNamespaces: ['fe'],
+      activeTags: ['ops'],
+    });
+    expect(labels(res.kinds.skills)).toEqual(['deploy@be', 'shared@']);
+  });
+
+  it('没订阅任何标签时，带标条目与非活跃 ns 一起照旧排除（2.0 行为逐字不变）', () => {
+    const res = resolve({
+      kinds: kindsOf({ skills: [skill('be', 'deploy', ['ops'])] }),
+      activeNamespaces: ['fe'],
+    });
+    expect(res.kinds.skills).toEqual([]);
+  });
+
+  it('订阅了别的标签不算数：按标签精确匹配', () => {
+    const res = resolve({
+      kinds: kindsOf({ skills: [skill('be', 'deploy', ['ops'])] }),
+      activeNamespaces: ['fe'],
+      activeTags: ['ci'],
+    });
+    expect(res.kinds.skills).toEqual([]);
+  });
+
+  it('tag 激活的 ns 条目与角色激活的另一 ns 条目同名 → 冲突停发该 kind', () => {
+    const res = resolve({
+      kinds: kindsOf({ skills: [skill('fe', 'a'), skill('be', 'a', ['ops'])] }),
+      activeNamespaces: ['fe'],
+      activeTags: ['ops'],
+    });
+    expect(res.haltedKinds).toEqual(['skills']);
+    expect(res.kinds.skills).toEqual([]);
+    expect(res.conflicts[0]).toContain('skills/fe/a');
+    expect(res.conflicts[0]).toContain('skills/be/a');
+  });
+
+  it('tag 激活的 ns 条目与根条目同名 → 整体替换根（标签不改变替换方向）', () => {
+    const res = resolve({
+      kinds: kindsOf({ skills: [skill('', 'a'), skill('be', 'a', ['ops'])] }),
+      activeNamespaces: [],
+      activeTags: ['ops'],
+    });
+    expect(res.kinds.skills).toEqual([skill('be', 'a', ['ops'])]);
+    expect(res.conflicts).toEqual([]);
+  });
+
+  it('union kind（docs）：带标条目在墙外追加，不替换也不判冲突', () => {
+    const kinds = emptyKinds();
+    kinds.docs = [doc('', 'guide'), doc('fe', 'style', ['fe-doc']), doc('be', 'deploy', ['ops'])];
+    const res = resolve({ kinds, activeNamespaces: ['fe'], activeTags: ['ops'] });
+    expect(res.kinds.docs.map((d) => d.name).sort()).toEqual(['be/deploy', 'fe/style', 'guide']);
+    expect(res.haltedKinds).toEqual([]);
+  });
+});
+
+describe('isResourceActive', () => {
+  const ns = new Set(['fe']);
+  const none = new Set<string>();
+  it('根条目恒活跃，标签无关', () => {
+    expect(isResourceActive(skill('', 'a'), ns, none)).toBe(true);
+    expect(isResourceActive(skill('', 'a', ['ops']), ns, new Set(['ops']))).toBe(true);
+  });
+  it('活跃 ns 的条目恒活跃，未带标也活跃', () => {
+    expect(isResourceActive(skill('fe', 'a'), ns, none)).toBe(true);
+  });
+  it('非活跃 ns 只有命中已订阅标签才活跃', () => {
+    const tags = new Set(['ops']);
+    expect(isResourceActive(skill('be', 'a', ['ops', 'ci']), ns, tags)).toBe(true);
+    expect(isResourceActive(skill('be', 'a', ['ci']), ns, tags)).toBe(false);
+    expect(isResourceActive(skill('be', 'a'), ns, tags)).toBe(false);
+    expect(isResourceActive(skill('be', 'a', ['ops']), ns, none)).toBe(false);
+  });
+});
+
 const cfg = (over: Partial<Config>): Config => ({
   version: 1,
   repo: 'https://example.invalid/repo.git',
   provider: 'git',
   primaryRole: null,
   additionalRoles: [],
+  subscribedTags: [],
   agents: [],
   ...over,
 });

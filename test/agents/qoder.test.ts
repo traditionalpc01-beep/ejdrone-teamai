@@ -96,7 +96,7 @@ describe('qoder installHook（<home>/.qoder/settings.json，Claude 兼容形 Ses
       'utf8',
     );
 
-    const cmd = `${HOOK_COMMAND_MARKER} node /opt/ejdrone-skills/dist/cli.js pull --silent`;
+    const cmd = `${HOOK_COMMAND_MARKER} node /opt/ejdrone-teamai/dist/cli.js pull --silent`;
     expect(qoderIntlAdapter.installHook(home, HOME_ENV, cmd)).toEqual({ installed: true });
     expect(qoderIntlAdapter.installHook(home, HOME_ENV, cmd)).toEqual({ installed: true }); // 幂等
 

@@ -1,4 +1,4 @@
-# ejdrone-skills 真机试验记录（单侧：开发者 → 评审 → 合入 → 本机投递）
+# ejdrone-teamai 真机试验记录（单侧：开发者 → 评审 → 合入 → 本机投递）
 
 日期：2026-10-11 · 机器：macOS（darwin 27.0.0，Apple Silicon）· 执行者：Qoder 会话
 状态：**流程跑通，暴露并修掉 3 个真缺陷；成员侧待另一台机器验证**
@@ -7,8 +7,8 @@
 
 | 项 | 值 |
 |---|---|
-| 工具代码仓库 | https://github.com/traditionalpc01-beep/ejdrone-skills（private） |
-| 团队资产仓库（本次新建） | https://github.com/traditionalpc01-beep/ejdrone-teamai-demo（private） |
+| 工具代码仓库 | https://github.com/traditionalpc01-beep/ejdrone-teamai（private） |
+| 团队资产仓库（本次新建） | https://github.com/example/teamai-demo（private） |
 | 运行的 CLI | `node dist/cli.js`（本机源码构建，未走 npm 全局安装） |
 | 选定工具 | qoder-cn、claude、codex |
 | 角色 | `shoot`（namespaces: [shoot]） |
@@ -19,7 +19,7 @@
 
 | # | 动作 | 结果 |
 |---|---|---|
-| 1 | 建空仓库 `ejdrone-teamai-demo` | 成功，无任何分支 |
+| 1 | 建空仓库 `teamai-demo` | 成功，无任何分支 |
 | 2 | `ejdrone init <repo> --agent qoder-cn,claude,codex` | **失败**（缺陷 1）：`reset --hard origin/main` 在无提交的远端报 unknown revision |
 | 3 | 修缺陷 1 后重跑 init | `已投递 0 个文件到 3 个工具`，3 个 hook 写入，config 落盘；但暴露缺陷 2 |
 | 4 | `ejdrone roles add shoot --namespaces shoot -d "摄影与后期"` | 输出 `团队仓库首个提交已直接落到 main`，远端出现 `manifest/roles.yaml` |
@@ -78,11 +78,11 @@
 
 ```bash
 # 0) 取工具：仓库构建产物或源码 npm ci + npm run build
-git clone https://github.com/traditionalpc01-beep/ejdrone-skills.git
-cd ejdrone-skills && npm ci && npm run build
+git clone https://github.com/traditionalpc01-beep/ejdrone-teamai.git
+cd ejdrone-teamai && npm ci && npm run build
 
 # 1) 初始化（这台机器应只勾自己真正在用的工具）
-node dist/cli.js init https://github.com/traditionalpc01-beep/ejdrone-teamai-demo.git \
+node dist/cli.js init https://github.com/example/teamai-demo.git \
   --agent qoder-cn --role shoot
 
 # 2) 看拿到了什么
@@ -113,8 +113,8 @@ rm -rf ~/.ejdrone                      # 清状态目录
 
 ## 7. 交付物清单
 
-- 代码仓库：`ejdrone-skills`（含本记录）
-- 团队资产仓库 `ejdrone-teamai-demo`：`README.md`（PR #3）、`manifest/roles.yaml`、
+- 代码仓库：`ejdrone-teamai`（含本记录）
+- 团队资产仓库 `teamai-demo`：`README.md`（PR #3）、`manifest/roles.yaml`、
   `skills/shoot/photo-shoot-organizer/SKILL.md`、`rules/shoot/shoot-delivery-convention.md`，PR #1/#2/#3 均已合入 main
 - 本轮代码改动：`src/git/repo.ts`、`src/cli/mr.ts`、`src/core/apply.ts`、`src/core/resources.ts` + 6 条新用例，
-  已提交 `7a78155` 并推到 ejdrone-skills 的 main
+  已提交 `7a78155` 并推到 ejdrone-teamai 的 main

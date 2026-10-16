@@ -1,4 +1,4 @@
-import { activeNamespaces } from '../core/plan.js';
+import { activeNamespaces, isResourceActive } from '../core/plan.js';
 import { resolveMcpResources } from '../core/mcp.js';
 import { allResources, mcpPayload, type Resource, type ResourceKind } from '../core/types.js';
 import type { CliContext } from './context.js';
@@ -79,6 +79,7 @@ export async function listCommand(ctx: CliContext, kind: string | undefined, opt
   const { namespaces, warnings } = activeNamespaces(config, snapshot.manifest);
   for (const warning of warnings) ctx.out(`提示：${warning}`);
   const active = new Set(namespaces);
+  const activeTags = new Set(config.subscribedTags);
   const { adapters, notes } = selectedAdapters(ctx, config);
   for (const note of notes) ctx.out(`提示：${note}`);
 
@@ -88,7 +89,7 @@ export async function listCommand(ctx: CliContext, kind: string | undefined, opt
       ctx.err('下一步：修好 mcp/mcp.yaml（顶层必须是 servers: 列表）后重跑');
       return 1;
     }
-    return listRepoMcp(ctx, snapshot.kinds.mcp, active, adapters.map((a) => a.id));
+    return listRepoMcp(ctx, snapshot.kinds.mcp, active, activeTags, adapters.map((a) => a.id));
   }
 
   const rows = (wanted === null ? allResources(snapshot.kinds) : snapshot.kinds[wanted]).sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
@@ -96,8 +97,17 @@ export async function listCommand(ctx: CliContext, kind: string | undefined, opt
   ctx.out(`团队仓库：${rows.length} 条（分支 ${snapshot.branch}）`);
   for (const row of rows) {
     const rootTag = row.namespace === '' ? '根条目' : `namespace=${row.namespace}`;
-    const activeTag = row.namespace === '' || active.has(row.namespace) ? '本次会下发' : '角色不匹配，本次不下发';
-    ctx.out(`  ${row.kind}  ${row.name}  ${rootTag}  ${activeTag}`);
+    // 标签命中时点名是哪个标签：这是成员唯一能看出「这条为什么我会收到」的地方
+    const hitTag =
+      row.namespace !== '' && !active.has(row.namespace) && row.tags !== undefined
+        ? row.tags.find((t) => activeTags.has(t))
+        : undefined;
+    const activeTag = isResourceActive(row, active, activeTags)
+      ? hitTag !== undefined
+        ? `本次会下发（tag:${hitTag}）`
+        : '本次会下发'
+      : '角色不匹配，本次不下发';
+    ctx.out(`  ${row.kind}  ${row.name}  ${rootTag}  ${activeTag}${row.tags && row.tags.length > 0 ? `  tags=${row.tags.join(',')}` : ''}`);
   }
   if (rows.length === 0) ctx.out('  （仓库里还没有 skills/ 或 rules/ 条目）');
   if (snapshot.mcpFileError !== null) {
@@ -140,7 +150,13 @@ function listLocalMcp(ctx: CliContext, agents: string[]): void {
 }
 
 /** 仓库侧清单：name / namespace / transport / 本次是否会下发。值一律不回显。 */
-function listRepoMcp(ctx: CliContext, servers: Resource[], active: Set<string>, agentIds: string[]): number {
+function listRepoMcp(
+  ctx: CliContext,
+  servers: Resource[],
+  active: Set<string>,
+  activeTags: ReadonlySet<string>,
+  agentIds: string[],
+): number {
   // 缺 \${VAR} 的条目不下发（只列变量名，绝不列值）
   const { skipped } = resolveMcpResources(servers, ctx.env);
   const missingByServer = new Map<string, string[]>();
@@ -149,7 +165,15 @@ function listRepoMcp(ctx: CliContext, servers: Resource[], active: Set<string>, 
   ctx.out(`团队仓库 MCP：${servers.length} 条`);
   for (const server of servers) {
     const rootTag = server.namespace === '' ? '根条目' : `namespace=${server.namespace}`;
-    const nsTag = server.namespace === '' || active.has(server.namespace) ? null : '角色不匹配，本次不下发';
+    const hitTag =
+      server.namespace !== '' && !active.has(server.namespace) && server.tags !== undefined
+        ? server.tags.find((t) => activeTags.has(t))
+        : undefined;
+    const nsTag = !isResourceActive(server, active, activeTags)
+      ? '角色不匹配，本次不下发'
+      : hitTag !== undefined
+        ? `本次会下发（tag:${hitTag}）`
+        : null;
     const payload = mcpPayload(server);
     const toolsTag =
       payload.tools && payload.tools.length > 0 && !payload.tools.some((t) => agentIds.includes(t))

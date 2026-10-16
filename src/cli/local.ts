@@ -132,5 +132,5 @@ export function candidateKey(candidate: { kind: ResourceKind; name: string }): s
 
 /** 只需要"扫哪几个工具目录"时用它：本地候选扫描不依赖 repo/provider。 */
 export function scanLocalAgents(ctx: CliContext, agents: string[]): { candidates: LocalCandidate[]; warnings: string[] } {
-  return scanLocal(ctx, { version: 1, repo: '', provider: 'git', primaryRole: null, additionalRoles: [], agents });
+  return scanLocal(ctx, { version: 1, repo: '', provider: 'git', primaryRole: null, additionalRoles: [], subscribedTags: [], agents });
 }

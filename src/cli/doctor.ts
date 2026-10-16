@@ -418,7 +418,11 @@ export async function doctorCommand(
     // 纯函数，只加 WARN 不改退出码判据（WARN 不计入 fails>0 ? 1 : 0）。
     if (config !== null) {
       const { namespaces } = activeNamespaces(config, snapshot.manifest);
-      const resolution = resolve({ kinds: snapshot.kinds, activeNamespaces: namespaces });
+      const resolution = resolve({
+        kinds: snapshot.kinds,
+        activeNamespaces: namespaces,
+        activeTags: config.subscribedTags,
+      });
       // 'mcp' 的停发由 mcpFileError 触发、mcp:parse 已覆盖，这里只点名 skills/rules 的冲突
       const conflicted = resolution.haltedKinds.filter((kind) => kind !== 'mcp');
       if (conflicted.length > 0) {
@@ -442,6 +446,23 @@ export async function doctorCommand(
           message: `本地订阅的角色不在 manifest 里：${unknownRoles.join('、')}（这些角色的 namespace 不会下发）`,
           hint: 'ejdrone roles set <manifest 里有的角色 id>；或让管理员把该角色加进 manifest/roles.yaml',
         });
+      }
+      // 2.1：订阅的标签没有任何条目使用（管理员还没推内容，或拼写不对）——
+      // 与 roles:unknown 同级：成员可自行解决（退订或改拼写），WARN 不计入退出码。
+      if (config.subscribedTags.length > 0) {
+        const usedTags = new Set<string>();
+        for (const resource of allResources(snapshot.kinds)) {
+          for (const tag of resource.tags ?? []) usedTags.add(tag);
+        }
+        const unusedTags = config.subscribedTags.filter((tag) => !usedTags.has(tag));
+        if (unusedTags.length > 0) {
+          add({
+            id: 'tags:unknown',
+            status: 'WARN',
+            message: `本地订阅的标签没有任何条目使用：${unusedTags.join('、')}（不会带来额外下发）`,
+            hint: 'ejdrone tags list 看仓库现有的标签；退订用 ejdrone tags unsubscribe <标签>',
+          });
+        }
       }
     }
   }

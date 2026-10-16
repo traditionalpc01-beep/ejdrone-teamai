@@ -233,7 +233,7 @@ export function describeAdapter(adapter: AgentAdapter): void {
           ),
           'utf8',
         );
-        const cmd = `${HOOK_COMMAND_MARKER} node /opt/ejdrone-skills/dist/cli.js pull --silent`;
+        const cmd = `${HOOK_COMMAND_MARKER} node /opt/ejdrone-teamai/dist/cli.js pull --silent`;
         expect(adapter.installHook(home, HOME_ENV, cmd)).toEqual({ installed: true });
         expect(adapter.installHook(home, HOME_ENV, cmd)).toEqual({ installed: true });
 

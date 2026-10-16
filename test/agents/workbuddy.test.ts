@@ -44,7 +44,7 @@ describe('workbuddy: rules 不下发 + hook 与用户条目共存', () => {
       JSON.stringify({ enabledPlugins: {}, hooks: { SessionStart: [userEntry] } }, null, 2),
       'utf8',
     );
-    const cmd = `${HOOK_COMMAND_MARKER} node /opt/ejdrone-skills/dist/cli.js pull --silent`;
+    const cmd = `${HOOK_COMMAND_MARKER} node /opt/ejdrone-teamai/dist/cli.js pull --silent`;
 
     expect(workbuddyAdapter.installHook(home, HOME_ENV, cmd)).toEqual({ installed: true });
     expect(workbuddyAdapter.installHook(home, HOME_ENV, cmd)).toEqual({ installed: true });

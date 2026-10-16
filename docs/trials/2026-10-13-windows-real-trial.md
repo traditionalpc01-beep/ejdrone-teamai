@@ -1,7 +1,7 @@
-# ejdrone-skills 2.0 · M10 试验记录（Windows 真机首次执行）
+# ejdrone-teamai 2.0 · M10 试验记录（Windows 真机首次执行）
 
 > **产物落点（2026-10-13 迁移后）**：本文提到的 `F:\tmp\ejdrone\…` 试验脚本、日志、备份与证据文件
-> 现在统一在 **`F:\ejdrone\`** —— 仓库是 `F:\ejdrone\ejdrone-skills`，验证脚本与 `*-evidence.txt`、
+> 现在统一在 **`F:\ejdrone\`** —— 仓库是 `F:\ejdrone\ejdrone-teamai`，验证脚本与 `*-evidence.txt`、
 > `real-claude-backup\`、各 `.log` 是它同级的开发文件。正文里当时写在 `F:\tmp\` 的原路径保持不动，
 > 那是执行现场的真实记录；按新位置找同名文件即可。
 
@@ -177,13 +177,13 @@ LOCALAPPDATA 缺失且注册表也没有 → findGitBash=null、hookCommand=null
 
 ### 7.2 已关闭：Windows 上的 npm 全局安装（`.cmd` 垫片形态）
 
-`npm pack` → `npm install -g ./ejdrone-skills-2.0.0-preview.0.tgz` → **全部用全局 `ejdrone` 命令**
+`npm pack` → `npm install -g ./ejdrone-teamai-2.0.0-preview.0.tgz` → **全部用全局 `ejdrone` 命令**
 （不是 `node dist/cli.js`）在隔离 HOME 上跑完整生命周期，验完 `npm uninstall -g` 还原：
 
 ```
 全局 bin：ejdrone / ejdrone.cmd / ejdrone.ps1 三件都在；ejdrone --version = 2.0.0-preview.0
 init → 退出码 0，hook 已装
-wrapper 正文里的 cli = C:\Users\ej\AppData\Roaming\npm\node_modules\ejdrone-skills\dist\cli.js
+wrapper 正文里的 cli = C:\Users\ej\AppData\Roaming\npm\node_modules\ejdrone-teamai\dist\cli.js
   真实存在 = true ；指向 .js 而不是 .cmd 垫片 = true   ← 关键：hook 不会去 exec 一个批处理
 doctor --json → {"pass":15,"warn":1,"fail":0} 退出码 0；hook:claude / win:hookbash / win:gitbash 全 PASS
 用这条安装形态的 hook 命令真跑自动 pull：cmd /c YES、powershell YES、git bash YES

@@ -145,7 +145,14 @@ function collectFlatMd(
       if (entry.name.endsWith('.md') && entry.name !== '.md') {
         const content = readIfExists(join(rootDir, entry.name));
         if (content === null) continue;
-        out.push({ kind, namespace: '', name: stripMd(entry.name), files: { content } });
+        const tags = readFrontmatterTags(content, `${kind}/${entry.name}`, warnings);
+        out.push({
+          kind,
+          namespace: '',
+          name: stripMd(entry.name),
+          files: { content },
+          ...(tags ? { tags } : {}),
+        });
       }
       continue;
     }
@@ -171,11 +178,13 @@ function collectFlatMd(
         const content = readIfExists(join(dirAbs, sub.name));
         if (content === null) continue;
         const base = stripMd(sub.name);
+        const tags = readFrontmatterTags(content, `${kind}/${entry.name}/${sub.name}`, warnings);
         out.push({
           kind,
           namespace: entry.name,
           name: qualifiedName ? `${entry.name}/${base}` : base,
           files: { content },
+          ...(tags ? { tags } : {}),
         });
       } else if (sub.isDirectory()) {
         warnings.push(`${kind}/${entry.name}/${sub.name} 是嵌套目录；不支持，跳过`);
@@ -214,7 +223,12 @@ function collectSkills(
         if (hasDirectFile(skillAbs, 'SKILL.md')) {
           const files: Record<string, string> = {};
           collectFiles(skillAbs, skillAbs, files);
-          out.push({ kind: 'skills', namespace: entry.name, name: sub.name, files });
+          const tags = readFrontmatterTags(
+            files['SKILL.md'] ?? '',
+            `skills/${entry.name}/${sub.name}`,
+            warnings,
+          );
+          out.push({ kind: 'skills', namespace: entry.name, name: sub.name, files, ...(tags ? { tags } : {}) });
         } else {
           warnings.push(`skills/${entry.name}/${sub.name} 没有 SKILL.md；跳过`);
         }
@@ -223,7 +237,8 @@ function collectSkills(
       if (directSkill) {
         const files: Record<string, string> = {};
         collectFiles(dirAbs, dirAbs, files);
-        out.push({ kind: 'skills', namespace: '', name: entry.name, files });
+        const tags = readFrontmatterTags(files['SKILL.md'] ?? '', `skills/${entry.name}`, warnings);
+        out.push({ kind: 'skills', namespace: '', name: entry.name, files, ...(tags ? { tags } : {}) });
       } else {
         warnings.push(`skills/${entry.name} 没有 SKILL.md；跳过`);
       }
@@ -247,7 +262,8 @@ function collectRules(
       if (entry.name.endsWith('.md') && entry.name !== '.md') {
         const content = readIfExists(join(rulesRoot, entry.name));
         if (content === null) continue;
-        out.push({ kind: 'rules', namespace: '', name: stripMd(entry.name), files: { content } });
+        const tags = readFrontmatterTags(content, `rules/${entry.name}`, warnings);
+        out.push({ kind: 'rules', namespace: '', name: stripMd(entry.name), files: { content }, ...(tags ? { tags } : {}) });
       }
       continue;
     }
@@ -264,7 +280,8 @@ function collectRules(
         if (sub.isFile() && sub.name.endsWith('.md') && sub.name !== '.md') {
           const content = readIfExists(join(dirAbs, sub.name));
           if (content === null) continue;
-          out.push({ kind: 'rules', namespace: entry.name, name: stripMd(sub.name), files: { content } });
+          const tags = readFrontmatterTags(content, `rules/${entry.name}/${sub.name}`, warnings);
+          out.push({ kind: 'rules', namespace: entry.name, name: stripMd(sub.name), files: { content }, ...(tags ? { tags } : {}) });
         } else if (sub.isDirectory()) {
           warnings.push(`rules/${entry.name}/${sub.name} 是嵌套目录；不支持，跳过`);
         }
@@ -376,5 +393,73 @@ export function completeFrontmatter(content: string, name: string): CompleteFron
   if (!hasName) next.name = name;
   if (!hasDescription) next.description = deriveDescription(split.body, name);
 
+  return { content: `${frontmatterBlock(next)}${split.body}`, changed: true };
+}
+
+// ---------------------------------------------------------------- tags (2.1)
+
+/**
+ * 从 frontmatter 读条目标签。坏形状（非字符串数组）当作无标签并点名 ——
+ * 静默吞掉会把「订阅了却不生效」伪装成「没人打标」。
+ * 返回 undefined = 没有可用标签（未写 / 空数组 / 坏形状 / 整块 YAML 坏）。
+ * 整块 YAML 坏时不在这里报：completeFrontmatter（push 侧）已经会点名同一处。
+ */
+export function readFrontmatterTags(
+  content: string,
+  label: string,
+  warnings: string[],
+): string[] | undefined {
+  const split = splitFrontmatter(content);
+  if (split === null) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = split.frontmatterText.trim() === '' ? {} : parseYaml(split.frontmatterText);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+  const raw = (parsed as Record<string, unknown>).tags;
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw) || raw.some((v) => typeof v !== 'string' || v.trim() === '')) {
+    warnings.push(`${label} 的 tags 不是字符串数组；忽略标签`);
+    return undefined;
+  }
+  const tags = [...new Set((raw as string[]).map((t) => t.trim()))];
+  return tags.length > 0 ? tags : undefined;
+}
+
+export interface SetFrontmatterTagsResult {
+  content: string;
+  changed: boolean;
+  error?: string;
+}
+
+/**
+ * 改写 frontmatter 的 tags 键（管理员 `tags add/remove` 用），其余键原样保留。
+ * `tags` 传 null 或空数组 = 删除该键（remove 掉最后一个标签后不留 `tags: []` 空壳）。
+ * 没有实际变化时 changed=false，调用方据此报「无需提交」而不是开空 MR。
+ */
+export function setFrontmatterTags(content: string, tags: string[] | null): SetFrontmatterTagsResult {
+  const split = splitFrontmatter(content);
+  if (split === null) {
+    if (tags === null || tags.length === 0) return { content, changed: false };
+    return { content: `${frontmatterBlock({ tags })}${content}`, changed: true };
+  }
+  let parsed: unknown;
+  try {
+    parsed = split.frontmatterText.trim() === '' ? {} : parseYaml(split.frontmatterText);
+  } catch (e) {
+    return { content, changed: false, error: `Frontmatter YAML is invalid: ${(e as Error).message}` };
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { content, changed: false, error: 'Frontmatter YAML root must be a mapping' };
+  }
+  const map = parsed as Record<string, unknown>;
+  const before = map.tags === undefined ? null : JSON.stringify(map.tags);
+  const after = tags !== null && tags.length > 0 ? JSON.stringify(tags) : null;
+  if (before === after) return { content, changed: false };
+  const next: Record<string, unknown> = { ...map };
+  if (tags !== null && tags.length > 0) next.tags = tags;
+  else delete next.tags;
   return { content: `${frontmatterBlock(next)}${split.body}`, changed: true };
 }

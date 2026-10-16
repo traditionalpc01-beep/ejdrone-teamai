@@ -128,7 +128,7 @@ describe('detect', () => {
 describe('planSkills landing (all 5 adapters)', () => {
   let home: string;
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'ejdrone-skills-'));
+    home = mkdtempSync(join(tmpdir(), 'ejdrone-teamai-'));
   });
   afterEach(() => rmSync(home, { recursive: true, force: true }));
 
@@ -387,7 +387,7 @@ describe('installHook / uninstallHook', () => {
       'utf8',
     );
 
-    const cmd = `${HOOK_COMMAND_MARKER} node /opt/ejdrone-skills/dist/cli.js pull --silent`;
+    const cmd = `${HOOK_COMMAND_MARKER} node /opt/ejdrone-teamai/dist/cli.js pull --silent`;
     expect(claudeAdapter.installHook(home, HOME_ENV, cmd)).toEqual({ installed: true });
     expect(claudeAdapter.installHook(home, HOME_ENV, cmd)).toEqual({ installed: true });
 
@@ -437,7 +437,7 @@ describe('installHook / uninstallHook', () => {
       ),
       'utf8',
     );
-    codexAdapter.installHook(home, HOME_ENV, `${HOOK_COMMAND_MARKER} node /opt/ejdrone-skills/dist/cli.js pull --silent`);
+    codexAdapter.installHook(home, HOME_ENV, `${HOOK_COMMAND_MARKER} node /opt/ejdrone-teamai/dist/cli.js pull --silent`);
     codexAdapter.uninstallHook(home, HOME_ENV);
     const after = JSON.parse(readFileSync(settingsPath, 'utf8')) as {
       hooks: { SessionStart: Array<{ hooks: Array<{ command: string }> }> };

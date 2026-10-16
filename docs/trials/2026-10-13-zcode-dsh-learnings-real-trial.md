@@ -10,7 +10,7 @@ GA 后 zcode 适配器已就位、本机新装了 dsh desktop，验证「经验�
 ## 本机起点
 
 - `~/.ejdrone` 为活跃 demo 状态（MCP 真机试验后留下）：repo =
-  `https://github.com/traditionalpc01-beep/ejdrone-teamai-demo.git`（私有，provider=git），
+  `https://github.com/example/teamai-demo.git`（私有，provider=git），
   角色 shoot，原工具 zcode+qoder-cn，qoder-cn 带 SessionStart hook。
 - `~/.dsh` 为 **dsh desktop 真实安装**，但目录形态与落点表 PROBE 假设不同：
   实际只有 `.agent-presets`、`.credentials.yaml`、`channel-pack`、`openai-gateway`、
@@ -90,7 +90,7 @@ GA 后 zcode 适配器已就位、本机新装了 dsh desktop，验证「经验�
 ## 收尾（2026-10-13 晚，两项跟进均完成）
 
 1. **内置技能入库并下发**：`ejdrone readme` 就地更新未合并分支 `ejdrone/readme-20261011T090837Z`
-   （.gitattributes + README + ejdrone-recall/ejdrone-share），[PR #6](https://github.com/traditionalpc01-beep/ejdrone-teamai-demo/pull/6)
+   （.gitattributes + README + ejdrone-recall/ejdrone-share），[PR #6](https://github.com/example/teamai-demo/pull/6)
    合入后 pull 下发 6 文件到 3 工具。`~/.dsh/skills/` 现有四项：ejdrone-recall、ejdrone-share、
    hook-probe、photo-shoot-organizer。dsh 已证读技能目录，其 agent 从此有「动手前先 recall」的
    教程，8 分 47 秒盲搜问题根治。注意：dsh 技能列表是会话启动定格的，需重开会话才看到新技能。

@@ -44,7 +44,7 @@ describe('codebuddy: rules 不下发 + hook 与用户条目共存', () => {
       JSON.stringify({ theme: 'dark', hooks: { SessionStart: [userEntry] } }, null, 2),
       'utf8',
     );
-    const cmd = `${HOOK_COMMAND_MARKER} node /opt/ejdrone-skills/dist/cli.js pull --silent`;
+    const cmd = `${HOOK_COMMAND_MARKER} node /opt/ejdrone-teamai/dist/cli.js pull --silent`;
 
     expect(codebuddyAdapter.installHook(home, HOME_ENV, cmd)).toEqual({ installed: true });
     expect(codebuddyAdapter.installHook(home, HOME_ENV, cmd)).toEqual({ installed: true });

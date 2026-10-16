@@ -4,6 +4,7 @@ import { isKnowledgePath, planKnowledge } from '../core/knowledge.js';
 import { activeNamespaces, resolve } from '../core/plan.js';
 import { knowledgeDir } from '../state.js';
 import {
+  RESOURCE_KINDS,
   type AgentAdapter,
   type Config,
   type KindSet,
@@ -66,10 +67,24 @@ export function buildDelivery(ctx: CliContext, config: Config, snapshot: Snapsho
   const notes: string[] = [];
   const { namespaces, warnings } = activeNamespaces(config, snapshot.manifest);
   notes.push(...warnings);
+  // 订阅了却没有任何条目使用的标签：不是错误（管理员可能还没推内容），点名让成员知道为何没生效。
+  if (config.subscribedTags.length > 0) {
+    const known = new Set<string>();
+    for (const kind of RESOURCE_KINDS) {
+      for (const resource of snapshot.kinds[kind]) {
+        for (const tag of resource.tags ?? []) known.add(tag);
+      }
+    }
+    const unused = config.subscribedTags.filter((tag) => !known.has(tag));
+    if (unused.length > 0) {
+      notes.push(`本地订阅的标签 ${unused.join('、')} 在仓库里还没有任何条目使用，暂时不会带来额外下发`);
+    }
+  }
 
   const resolution = resolve({
     kinds: snapshot.kinds,
     activeNamespaces: namespaces,
+    activeTags: config.subscribedTags,
   });
   notes.push(...resolution.warnings);
 
