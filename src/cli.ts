@@ -79,8 +79,8 @@ export async function runCli(argv: string[], input: CliContextInput = {}): Promi
     .argument('[repo]', '团队仓库地址（git clone 可用）')
     .option('--agent <ids>', `逗号分隔的工具 id（可选：${AGENT_IDS.join(', ')}）`)
     .option('--role <id>', '主角色 id（非交互时用；缺省则只下发根条目）')
-    .option('--provider <name>', 'gitlab（自动开 MR）| git（只推分支，手动开 MR）；缺省按仓库主机名判定')
-    .option('--force', '覆盖已有 config')
+    .option('--provider <name>', 'codeup（Codeup 仓，API 自动开 MR）| gitlab（自动开 MR）| git（只推分支，手动开 MR）；缺省按仓库主机名判定')
+    .option('--force', '覆盖已有 config；同时跳过交互问答（工具用 --agent/探测结果，角色用 --role）')
     .action(guard(async (repo: string | undefined, options: InitOptions) => initCommand(ctx, repo, options)));
 
   program

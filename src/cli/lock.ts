@@ -17,6 +17,16 @@ export function lockPath(env?: NodeJS.ProcessEnv): string {
 }
 
 /**
+ * sync.lock 当前是否被**本进程**持有。openSnapshot 的免 git 分支要用它避免与
+ * pull 的持锁重入死锁（acquireLock 不可重入：同进程二取会 EEXIST 且 pid 活着不可回收）。
+ * 持锁者不是本进程（含锁文件不存在/读不出）一律返回 false，由调用方决定是否自己拿锁。
+ */
+export function heldByCurrentProcess(env?: NodeJS.ProcessEnv): boolean {
+  const holder = readHolder(lockPath(env));
+  return holder !== null && holder === String(process.pid);
+}
+
+/**
  * 持锁进程还活着吗。进程崩溃/被杀后 pid 不存在（ESRCH）→ 死；EPERM = 存在但非本方
  * 进程 → 活着（保守：绝不抢活进程的锁）；其他错误也保守当活着。
  *

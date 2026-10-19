@@ -43,6 +43,15 @@ interface DoctorReport {
   notes: string[];
 }
 
+/**
+ * 主机的 PATH（integration/helpers.ts 同思路）：makeEnv 缺省不带 PATH —— 那正是
+ * 「无 git 机器」的形态，openSnapshot 会据此走免 git 分支。依赖真实快照的用例
+ * （本机 bare origin + git clone）必须显式注入主机 PATH，让 git 可用（仓库前置：本机 git 可用）。
+ */
+function hostPath(): string {
+  return process.env.PATH ?? process.env.Path ?? process.env.path ?? '';
+}
+
 /** 造一套隔离的 HOME + EJDRONE_HOME；overrides 控制 ProgramFiles / PATH 等平台变量。 */
 function makeEnv(tag: string, overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   const home = join(root, `home-${tag}`);
@@ -387,7 +396,7 @@ describe('roles:conflict / roles:unknown（doctor 的体检盲区补齐）', () 
   }
 
   it('双 namespace 同名冲突 → roles:conflict WARN；订阅角色不在 manifest → roles:unknown WARN', async () => {
-    const env = makeEnv('roles');
+    const env = makeEnv('roles', { PATH: hostPath() });
     seedTeamOrigin(env.EJDRONE_HOME as string);
     seedRolesConfig(env, join(env.EJDRONE_HOME as string, 'origin.git'));
 
@@ -402,7 +411,7 @@ describe('roles:conflict / roles:unknown（doctor 的体检盲区补齐）', () 
   });
 
   it('没有冲突、角色都在 manifest 时两条检查都不出现', async () => {
-    const env = makeEnv('roles-clean');
+    const env = makeEnv('roles-clean', { PATH: hostPath() });
     const origin = seedTeamOrigin(env.EJDRONE_HOME as string);
     const config: Config = {
       version: 1,
@@ -453,7 +462,7 @@ describe('tags:unknown（2.1：订阅的标签仓库无人使用）', () => {
   }
 
   it('订阅了仓库无人使用的标签 → WARN；订阅在用的标签 → 不出现', async () => {
-    const env = makeEnv('tags-unknown');
+    const env = makeEnv('tags-unknown', { PATH: hostPath() });
     const origin = seedTaggedOrigin(env.EJDRONE_HOME as string);
     saveConfig(
       {
@@ -477,7 +486,7 @@ describe('tags:unknown（2.1：订阅的标签仓库无人使用）', () => {
   });
 
   it('没有订阅任何标签时检查不出现（2.0 成员输出逐字节不变）', async () => {
-    const env = makeEnv('tags-none');
+    const env = makeEnv('tags-none', { PATH: hostPath() });
     const origin = seedTaggedOrigin(env.EJDRONE_HOME as string);
     saveConfig(
       {
@@ -494,5 +503,39 @@ describe('tags:unknown（2.1：订阅的标签仓库无人使用）', () => {
 
     const { report } = await runDoctor(env, 'darwin');
     expect(report.checks.some((c) => c.id === 'tags:unknown')).toBe(false);
+  });
+});
+
+// ------------------------------------------------------------------ 免 git 降级（doctor 无 git）
+
+describe('无 git 机器的 doctor（免 git 模式说明）', () => {
+  it('PATH 上没有 git 且仓库同步失败时：不崩，repo WARN，指引说明免 git 模式', async () => {
+    const emptyBin = join(root, 'empty-bin');
+    mkdirSync(emptyBin, { recursive: true });
+    const env = makeEnv('doctor-gitless', { PATH: emptyBin });
+    // repo 是非 Codeup 的本地路径：免 git 分支直接给出「装 git / 迁 Codeup」两条路，不发网络请求
+    seedConfig(env);
+    // hook 配好（node/cli 都指向真实文件），让 FAIL 计数确为 0 —— 无 git 本身不产生 FAIL
+    seedClaudeSettings(env, `EJDRONE_HOOK=1 '${process.execPath}' '${fakeCli()}' pull --silent`);
+
+    const { code, report } = await runDoctor(env, 'darwin');
+
+    expect(code).toBe(0); // 只有 WARN，退出码规则不变
+    const repo = checkOf(report, 'repo');
+    expect(repo.status).toBe('WARN');
+    expect(repo.hint).toContain('未检测到 git');
+    expect(repo.hint).toContain('免 git 模式');
+    expect(repo.hint).toContain('EJDRONE_CODEUP_TOKEN');
+  });
+
+  it('有 git 的机器（注入主机 PATH）下同夹具：repo hint 保持原句（输出冻结的护栏）', async () => {
+    const env = makeEnv('doctor-gitful', { PATH: hostPath() });
+    seedConfig(env);
+
+    const { report } = await runDoctor(env, 'darwin');
+
+    const repo = checkOf(report, 'repo');
+    expect(repo.status).toBe('WARN');
+    expect(repo.hint).toBe('检查网络与仓库访问权限后重跑 ejdrone doctor');
   });
 });

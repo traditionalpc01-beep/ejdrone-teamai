@@ -17,6 +17,7 @@ import {
   sameRepoUrl,
   writeFiles,
 } from '../../src/git/repo.js';
+import { API_CHECKOUT_MARKER } from '../../src/state.js';
 
 /**
  * 跑真实 git：`git init --bare` 当 origin，不 mock child_process。
@@ -150,6 +151,40 @@ describe('ensureClone', () => {
     // 那个不相干仓库仍然没有任何提交，也没被我们的 clone 写坏
     expect(gitStatus(parent, 'rev-parse', '--verify', 'HEAD').code).not.toBe(0);
     expect(existsSync(join(parent, 'README.md'))).toBe(false);
+  });
+
+  it('clears a non-git directory **with the api-sync marker** before cloning（免 git → 有 git 切换）', async () => {
+    const origin = makeOrigin();
+    const dir = join(root, 'repo');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'stale.txt'), 'left by gitless mode\n', 'utf8');
+    writeFileSync(join(dir, API_CHECKOUT_MARKER), 'main\nabc\n', 'utf8');
+
+    await ensureClone(origin, dir, env);
+
+    expect(existsSync(join(dir, '.git'))).toBe(true);
+    expect(existsSync(join(dir, 'stale.txt'))).toBe(false);
+    expect(readFileSync(join(dir, 'README.md'), 'utf8')).toBe('# team\n');
+  });
+
+  it('refuses to clear a non-git directory without the marker（EJDRONE_HOME 配错时不许误删用户目录）', async () => {
+    const origin = makeOrigin();
+    const dir = join(root, 'repo');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'user-file.txt'), 'not ours\n', 'utf8');
+
+    await expect(ensureClone(origin, dir, env)).rejects.toThrow(/拒绝清空/);
+    // 用户内容原样保留
+    expect(readFileSync(join(dir, 'user-file.txt'), 'utf8')).toBe('not ours\n');
+  });
+
+  it('refuses to clear a directory containing .git（半损坏仓库里可能有未推送提交）', async () => {
+    const origin = makeOrigin();
+    const dir = join(root, 'repo');
+    mkdirSync(join(dir, '.git'), { recursive: true }); // 假 .git：rev-parse 失败但目录在
+
+    await expect(ensureClone(origin, dir, env)).rejects.toThrow(/\.git.*拒绝自动清空/);
+    expect(existsSync(join(dir, '.git'))).toBe(true);
   });
 
   it('rejects an unreachable url with a git error, not a hang', async () => {

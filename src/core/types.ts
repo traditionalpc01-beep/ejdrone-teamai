@@ -108,7 +108,8 @@ export interface ManifestParseResult {
 export interface Config {
   version: number;
   repo: string;
-  provider: 'gitlab' | 'git';
+  // 2026-10-19 增量扩展，未改既有签名：加 'codeup'（云效 Codeup，OpenAPI 自动开 MR / 免 git 推送）
+  provider: 'gitlab' | 'git' | 'codeup';
   gitlabBaseUrl?: string;
   primaryRole: string | null;
   additionalRoles: string[];
@@ -360,13 +361,55 @@ export interface MrRequest {
 export interface MrResult {
   /** MR URL；generic provider 时为 null */
   url: string | null;
-  /** 给用户看的下一步指引（generic 或 token 缺失时非空） */
+  /** 给用户看的下一步指引（generic 或 token 缺失时非空；成功路径也可携带说明性备注） */
   instructions?: string;
+  /**
+   * 本次实际使用的远端分支名（2026-10-19 增量扩展）。免 git 推送由 provider 决定分支
+   * （可能复用既有分支），调用方展示与记账需要知道最终用了哪个；openMr 场景恒等于
+   * req.branch，可不填。
+   */
+  branch?: string;
+  /** 空仓库引导提交已直推默认分支、无需 MR（2026-10-19 增量扩展，仅 apiPush 使用） */
+  bootstrapped?: boolean;
+}
+
+/**
+ * 免 git 推送请求（2026-10-19 增量扩展，未改既有签名，本扩展已经用户批准）。
+ * 本机没有 git 时，`GitProvider.apiPush` 用纯 OpenAPI 完成「（复用或新建）分支 → 写文件 →
+ * 删文件 → 开 MR」，files / removedPaths 与 git 路径的 MrChange 同源（仓库根相对路径 → 内容）。
+ * 分支策略由 provider 负责：按 branchPrefix 复用远端既有未合并分支，没有才新开（与 git 路径
+ * 的 listRemoteBranches 复用语义对齐）——调用方没有 git，列不了远端分支。
+ */
+export interface ApiPushRequest {
+  /** 分支前缀（如 ejdrone/push-skills-alpha-）；provider 在此基础上复用或新建分支 */
+  branchPrefix: string;
+  /** 目标分支（默认分支）；缺省由 provider 回落 main */
+  targetBranch?: string;
+  title: string;
+  body: string;
+  /** 仓库根相对路径 → 内容（与 MrChange.files 同形） */
+  files: Record<string, string>;
+  /**
+   * 要从仓库删除的仓库根相对路径。可能是目录（skills/<ns>/<name>），provider 负责
+   * 展开成目标分支上的具体文件路径再逐个删除。
+   */
+  removedPaths?: string[];
+  /**
+   * 空仓库首笔引导（2026-10-19 增量扩展）：远端没有任何提交时为 true，provider 把
+   * files 直接写入默认分支（不开分支不开 MR），对应 git 路径的 bootstrap 语义。
+   */
+  bootstrap?: boolean;
 }
 
 export interface GitProvider {
   readonly kind: Config['provider'];
   openMr(req: MrRequest): Promise<MrResult>;
+  /**
+   * 可选（2026-10-19 增量扩展，未改既有签名）：托管有 OpenAPI 时实现，
+   * 承接本机没有 git 的推送降级；没有实现的能力按「不支持免 git 推送」处理。
+   * 与 openMr 同一姿态：失败折进 MrResult.instructions，绝不上抛（远端可能已推了一半）。
+   */
+  apiPush?(req: ApiPushRequest): Promise<MrResult>;
 }
 
 export interface CheckoutHandle {

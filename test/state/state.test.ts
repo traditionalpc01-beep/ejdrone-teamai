@@ -105,6 +105,20 @@ describe('saveConfig / loadConfig', () => {
     expect(loadConfig(env).config).toEqual(withoutBase);
   });
 
+  it('round-trips a codeup config（provider=codeup；organizationId 不落 config，每次现算）', () => {
+    const codeup: Config = {
+      ...base,
+      provider: 'codeup',
+      repo: 'https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-teamai.git',
+    };
+    saveConfig(codeup, env);
+
+    expect(loadConfig(env).config).toEqual(codeup);
+    // codeupOrgId 曾短暂存在又被移除：换 token/换组织后陈旧 orgId 会让 push 打到旧组织
+    // 而 pull 正常（gitless 现算），config 不允许再携带这个键
+    expect(readFileSync(configPath(env), 'utf8')).not.toMatch(/codeupOrgId/);
+  });
+
   it('creates the state directory and marks the file 0600', () => {
     saveConfig(base, env);
 

@@ -55,6 +55,18 @@ export function repoDir(env?: NodeJS.ProcessEnv): string {
   return join(stateDir(env), REPO_DIR_NAME);
 }
 
+/**
+ * checkout 目录（repoDir）里由免 git 链路写入的两个哨兵文件名（放 state.ts 这个中立层，
+ * repo.ts / gitless.ts / snapshot.ts 三方共用，避免 git 层内部互相 import 成环）：
+ * - API_CHECKOUT_MARKER：内容为 `${branch}\n${head}`，兼两个职责——证明该目录是
+ *   ejdrone 的 API 同步产物（ensureClone 只清带它的目录），以及「上次同步到哪个提交」
+ *   的缓存（远端 head 未变则跳过全量重下）。
+ * - SYNC_INCOMPLETE_MARKER：拉取进行中写入、全部成功后删除；存在即表示目录是半截，
+ *   readExistingSnapshot 拒绝把它当团队真相。
+ */
+export const API_CHECKOUT_MARKER = '.ejdrone-api-checkout';
+export const SYNC_INCOMPLETE_MARKER = '.ejdrone-sync-incomplete';
+
 export function debugLogPath(env?: NodeJS.ProcessEnv): string {
   return join(stateDir(env), DEBUG_LOG_FILE);
 }
@@ -101,7 +113,7 @@ const configSchema = z
   .object({
     version: z.literal(1),
     repo: z.string().min(1),
-    provider: z.enum(['gitlab', 'git']),
+    provider: z.enum(['gitlab', 'git', 'codeup']),
     gitlabBaseUrl: z.string().min(1).optional(),
     primaryRole: z.string().nullable(),
     additionalRoles: z.array(z.string().min(1)),

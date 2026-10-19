@@ -22,6 +22,20 @@
 
 ## 安装
 
+### 一键安装（推荐给非开发角色）
+
+Windows 成员（产品、运营等，机器上没有 Node 与 git）一条命令完成：便携 Node 装进
+`~/.ejdrone/runtime`、CLI 装进 `~/.ejdrone/npm-global`（独立 npmrc，不碰系统 Node 与
+`~/.npmrc`），随后自动执行 `ejdrone init` 并在桌面放一个手动同步入口。托管地址与角色等
+参数由管理员预先烤进脚本，准备与分发见 `docs/deploy/member-zero-install.md`：
+
+```powershell
+# 地址以管理员发布为准
+powershell -c "irm <托管地址>/ejdrone-setup.ps1 | iex"
+```
+
+### 手动安装（开发角色）
+
 前置：Node.js ≥ 20 与 git；Windows 另需 [Git for Windows](https://git-scm.com/download/win)。
 
 ```bash

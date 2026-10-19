@@ -7,7 +7,7 @@ import { resolveMcpResources } from '../core/mcp.js';
 import { isKnowledgePath } from '../core/knowledge.js';
 import { activeNamespaces, resolve } from '../core/plan.js';
 import { hasHook, installedHookCommand } from '../hooks.js';
-import { findGitBash, isWindows, samePath, whichWithPathext } from '../platform.js';
+import { findGitBash, hasGitAvailable, isWindows, samePath, whichWithPathext } from '../platform.js';
 import { currentCliEntry, isDegradedHookCommand, parseHookBash, parseHookPaths, parseHookWrapper } from './constants.js';
 import { loadLedger } from '../core/ledger.js';
 import type { Config, Ledger } from '../core/types.js';
@@ -367,6 +367,9 @@ export async function doctorCommand(
   }
 
   let snapshot: Snapshot | null = null;
+  // 免 git 机器（PATH 上没有 git）：repo 同步失败时照旧落回本地快照，指引里说明免 git 模式。
+  // 有 git 的机器该分支永不进入，doctor 输出逐字节不变（POSIX --json 输出是冻结的）。
+  const gitless = !hasGitAvailable(ctx.env);
   if (config) {
     const loaded = await openSnapshot(ctx, config.repo);
     if (loaded.ok) {
@@ -382,9 +385,13 @@ export async function doctorCommand(
         id: 'repo',
         status: 'WARN',
         message: `仓库暂时同步不了（离线或权限不足）：${loaded.error}`,
-        hint: snapshot
-          ? '联网后重跑 ejdrone pull；以下检查基于本地已有快照，可能不是最新'
-          : '检查网络与仓库访问权限后重跑 ejdrone doctor',
+        hint: gitless
+          ? snapshot
+            ? '未检测到 git：使用免 git 模式（Codeup + EJDRONE_CODEUP_TOKEN）；以下检查基于本地已有快照，可能不是最新'
+            : '未检测到 git：使用免 git 模式（Codeup + EJDRONE_CODEUP_TOKEN）——安装 git，或把团队仓库迁到 codeup.aliyun.com 并设置 EJDRONE_CODEUP_TOKEN'
+          : snapshot
+            ? '联网后重跑 ejdrone pull；以下检查基于本地已有快照，可能不是最新'
+            : '检查网络与仓库访问权限后重跑 ejdrone doctor',
       });
     }
   } else {

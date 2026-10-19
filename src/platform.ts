@@ -200,6 +200,17 @@ function whichOnPosix(name: string, env: NodeJS.ProcessEnv): string | null {
   return null;
 }
 
+// ------------------------------------------------------------------ hasGitAvailable
+
+/**
+ * PATH 上有没有可用的 git 可执行文件。免 git 降级链路（API 拉取 / API 推送）用它决定走哪条：
+ * 有 git 一律走 git（行为与 2.1 逐字节相同），没有才退化到 Codeup oapi。
+ * 只依赖 whichWithPathext 的探测结果，不做其他猜测（如「Windows 一般装了 git」）。
+ */
+export function hasGitAvailable(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): boolean {
+  return whichWithPathext('git', env, platform) !== null;
+}
+
 // --------------------------------------------------------------------- samePath
 
 /**

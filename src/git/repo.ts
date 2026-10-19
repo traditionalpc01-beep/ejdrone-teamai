@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import type { CheckoutHandle, PrePushScan } from '../core/types.js';
+import { API_CHECKOUT_MARKER, SYNC_INCOMPLETE_MARKER } from '../state.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -123,6 +124,31 @@ export async function ensureClone(
     await git(['-C', dir, 'fetch', 'origin'], { env });
     return { relinked: true };
   }
+  // dir 存在但不是 git 仓库：先看清里面是什么再决定动不动。
+  // - 空目录（含不存在）：没有可丢的内容，直接 clone（git 本身允许 clone 进空目录）。
+  // - 含 .git：rev-parse 失败多半是 .git 半损坏（断电残留 lock、对象缺失），里面可能有
+  //   未推送的本地提交——绝不静默清空，让人来决定。
+  // - 带免 git 链路的哨兵（API_CHECKOUT_MARKER / SYNC_INCOMPLETE_MARKER）：是 ejdrone
+  //   自己的 API 同步产物，清掉再 clone（典型：机器从免 git 切回有 git）。
+  // - 两者都不是：视为用户的目录（EJDRONE_HOME 可能被配到了真实数据目录），拒绝动它。
+  const entries = existsSync(dir) ? readdirSync(dir) : [];
+  if (entries.length > 0) {
+    if (entries.includes('.git')) {
+      throw new Error(
+        `${dir} 里有 .git 但不是可用仓库（可能半损坏，或有未推送的本地提交），拒绝自动清空。` +
+          '下一步：确认不需要其中的本地内容后手动删除该目录，或修复 .git 后重跑',
+      );
+    }
+    const ownedByApiSync =
+      entries.includes(API_CHECKOUT_MARKER) || entries.includes(SYNC_INCOMPLETE_MARKER);
+    if (!ownedByApiSync) {
+      throw new Error(
+        `${dir} 已存在、不是 git 仓库、也没有本工具的同步标记，拒绝清空（EJDRONE_HOME 是否指向了错误位置？）。` +
+          '下一步：确认该目录内容可弃后手动删除，或修正 EJDRONE_HOME 后重跑',
+      );
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
   await git(['clone', url, dir], { env });
   return { relinked: false };
 }
@@ -232,7 +258,12 @@ export function writeFiles(dir: string, files: Record<string, string>): void {
   }
 }
 
-function resolveInside(root: string, relPath: string): string {
+/**
+ * checkout 内的路径安全校验（唯一 owner，gitless.ts 的 API 拉取与本文件的 writeFiles
+ * 共用）：空路径、NUL、绝对路径、逃逸 checkout 的相对路径一律抛错。远端数据（git
+ * checkout 或 Codeup tree 响应）进 checkout 前必须过这道闸。
+ */
+export function resolveInside(root: string, relPath: string): string {
   if (relPath === '' || relPath.trim() === '') {
     throw new Error(`Refusing to write an empty path inside ${root}`);
   }

@@ -53,6 +53,33 @@ describe('交互式 init', () => {
     expect(member.exists('.claude', 'skills', 'root-note', 'SKILL.md')).toBe(true);
     expect(member.exists('.claude', 'rules', 'db.md')).toBe(false);
   });
+
+  it('角色问答把管理员写的描述亮出来（非开发者不认识 fe/be 这类内部 id）', async () => {
+    const member = h.member('interactive-role-labels');
+    installTools(member, ['claude']);
+    let roleLabels: string[] = [];
+    let call = 0;
+    const result = await member.run(['init', h.origin], {
+      interactive: true,
+      choose: async (_question, items) => {
+        call += 1;
+        if (call === 2) {
+          roleLabels = items.map((item) => item.label);
+          return []; // 选「跳过」
+        }
+        return items.filter((item) => item.value === 'claude').map((item) => item.value);
+      },
+      prompt: async () => '',
+      confirm: async () => false,
+    });
+
+    expect(result.code, result.all).toBe(0);
+    expect(roleLabels).toContain('角色 be（后端）');
+    expect(roleLabels).toContain('角色 fe（前端）');
+    // 跳过项说人话，并指路事后修改
+    expect(roleLabels.some((l) => l.includes('不确定') && l.includes('roles set'))).toBe(true);
+    expect(result.all).toContain('roles set');
+  });
 });
 
 describe('交互式 push 与 uninstall', () => {

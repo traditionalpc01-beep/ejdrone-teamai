@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 
 import { registry } from '../agents/index.js';
 import type { AgentAdapter, Config } from '../core/types.js';
+import { isCodeupUrl } from '../git/codeup-api.js';
 import { loadConfig, saveConfig } from '../state.js';
 import { splitList, type CliContext } from './context.js';
 import { hookCommand, win32Hook, type Win32Hook } from './constants.js';
@@ -19,13 +20,15 @@ export interface InitOptions {
 const GITLAB_HOST_RE = /gitlab/i;
 
 /**
+ * Codeup（codeup.aliyun.com，含 scp 式）→ codeup provider；
  * 主机名（含 scp 式 git@host:path）里出现 gitlab 就走 GitLab provider。
  * --provider 显式覆盖：自建 GitLab 常常不用 gitlab 这个域名。
  */
 export function providerForRepo(repo: string, override?: string): Config['provider'] {
   const value = (override ?? '').trim();
-  if (value === 'gitlab' || value === 'git') return value;
+  if (value === 'gitlab' || value === 'git' || value === 'codeup') return value;
   const raw = repo.trim();
+  if (isCodeupUrl(raw)) return 'codeup';
   let host = '';
   try {
     host = new URL(raw).hostname;
@@ -45,7 +48,11 @@ function validateAgentIds(ids: string[]): { ok: true } | { ok: false; error: str
   return { ok: true };
 }
 
-async function pickAdapters(ctx: CliContext, provided: string | undefined): Promise<AgentAdapter[] | null> {
+async function pickAdapters(
+  ctx: CliContext,
+  provided: string | undefined,
+  ask: boolean,
+): Promise<AgentAdapter[] | null> {
   const registry_ = registry();
   if (provided !== undefined && provided.trim() !== '') {
     const ids = splitList(provided);
@@ -59,10 +66,11 @@ async function pickAdapters(ctx: CliContext, provided: string | undefined): Prom
   }
 
   const detected = registry_.all().filter((adapter) => adapter.detect(ctx.home, ctx.env));
-  if (!ctx.interactive) {
+  if (!ask) {
     if (detected.length === 0) {
       ctx.err('错误：没有 --agent，也没有探测到已安装的 AI 工具。');
-      ctx.err(`下一步：加 --agent <id,id>，可选 ${registry_.ids().join(', ')}`);
+      ctx.err('下一步：先安装并至少打开一次你在用的 AI 工具，再重跑 ejdrone init；或用 --agent <id,id> 直接指定');
+      ctx.err(`可选 id：${registry_.ids().join(', ')}`);
       return null;
     }
     ctx.out(`已探测到并选用：${detected.map((a) => a.label).join('、')}`);
@@ -77,10 +85,19 @@ async function pickAdapters(ctx: CliContext, provided: string | undefined): Prom
   return chosen.map((id) => registry_.byId(id)).filter((a): a is AgentAdapter => Boolean(a));
 }
 
+/** 角色选项的展示标签：id 后面跟管理员在 roles.yaml 里写的中文描述。
+ *  非开发者成员不认识 fe/devops 这类内部 id，描述是唯一的人话锚点——
+ *  `ejdrone roles list` 早就显示它，第一次问答（这里）更不能缺席。 */
+function roleLabel(roles: { id: string; description?: string }[], id: string): string {
+  const role = roles.find((r) => r.id === id);
+  return role?.description ? `${id}（${role.description}）` : id;
+}
+
 async function pickRoles(
   ctx: CliContext,
   snapshot: Snapshot,
   provided: string | undefined,
+  ask: boolean,
 ): Promise<{ primaryRole: string | null; additionalRoles: string[] }> {
   const roles = snapshot.manifest?.roles ?? [];
   if (roles.length === 0) {
@@ -95,10 +112,10 @@ async function pickRoles(
   const primary = requested[0];
   if (primary !== undefined) {
     if (!ids.includes(primary)) ctx.out(`提示：角色「${primary}」不在 manifest/roles.yaml 中，pull 时会告警`);
-    if (ctx.interactive) {
+    if (ask) {
       const extra = await ctx.choose(
         '还要订阅哪些角色？（可多选，回车跳过）',
-        ids.filter((id) => id !== primary).map((id) => ({ value: id, label: id })),
+        ids.filter((id) => id !== primary).map((id) => ({ value: id, label: roleLabel(roles, id) })),
         [],
       );
       return { primaryRole: primary, additionalRoles: extra };
@@ -106,22 +123,25 @@ async function pickRoles(
     return { primaryRole: primary, additionalRoles: [] };
   }
 
-  if (!ctx.interactive) {
+  if (!ask) {
     ctx.out('提示：未指定 --role，本次不设角色，只下发根条目。下一步：ejdrone roles set <primary> [--add <ids>]');
     return { primaryRole: null, additionalRoles: [] };
   }
 
   const items = [
-    ...ids.map((id) => ({ value: id, label: `角色 ${id}` })),
-    { value: '', label: '不设角色（只下发根条目）' },
+    ...ids.map((id) => ({ value: id, label: `角色 ${roleLabel(roles, id)}` })),
+    { value: '', label: '不确定 / 先跳过（只下发全员内容，之后可 ejdrone roles set 修改）' },
   ];
   const only = ids.length === 1 ? ids[0] : undefined;
   const chosen = await ctx.choose('选择你的主角色：', items, only === undefined ? [] : [only]);
   const picked = chosen[0] ?? '';
-  if (picked === '') return { primaryRole: null, additionalRoles: [] };
+  if (picked === '') {
+    ctx.out('提示：未设角色。对 AI 工具说「我是产品经理，帮我设置角色」或运行 ejdrone roles set <id> 可随时补上');
+    return { primaryRole: null, additionalRoles: [] };
+  }
   const extra = await ctx.choose(
     '还要订阅哪些角色？（可多选，回车跳过）',
-    ids.filter((id) => id !== picked).map((id) => ({ value: id, label: id })),
+    ids.filter((id) => id !== picked).map((id) => ({ value: id, label: roleLabel(roles, id) })),
     [],
   );
   return { primaryRole: picked, additionalRoles: extra };
@@ -177,9 +197,14 @@ export async function initCommand(ctx: CliContext, repo: string | undefined, opt
   }
 
   const requestedProvider = (options.provider ?? '').trim();
-  if (requestedProvider !== '' && requestedProvider !== 'gitlab' && requestedProvider !== 'git') {
+  if (
+    requestedProvider !== '' &&
+    requestedProvider !== 'gitlab' &&
+    requestedProvider !== 'git' &&
+    requestedProvider !== 'codeup'
+  ) {
     ctx.err(`错误：--provider「${requestedProvider}」不认识。`);
-    ctx.err('下一步：用 gitlab（自动开 MR）或 git（只推分支，手动开 MR）');
+    ctx.err('下一步：用 codeup（Codeup 仓库，API 自动开 MR）、gitlab（自动开 MR）或 git（只推分支，手动开 MR）');
     return 1;
   }
 
@@ -206,7 +231,13 @@ export async function initCommand(ctx: CliContext, repo: string | undefined, opt
   // 在随后的首次 pull 里已经不会再出现（origin 已一致），成员就无从得知搬过仓库。
   for (const warning of snapshot.warnings) ctx.out(`提示：${warning}`);
 
-  const adapters = await pickAdapters(ctx, options.agent);
+  // --force 跳过全部问答（README 对脚本/CI 的承诺）：工具用 --agent 或探测结果、
+  // 角色用 --role，缺省项按各自的无输入路径处理（探测不到就报可行动错误）。
+  // 一键安装脚本在首跑时烤好 -Agent/-Role 再带 --force，成员零问答；
+  // 重跑升级不传 --force（由脚本的 config.yaml 存在性判定跳过 init），成员的定制不被清洗。
+  const ask = ctx.interactive && options.force !== true;
+
+  const adapters = await pickAdapters(ctx, options.agent, ask);
   if (adapters === null) return 1;
   if (adapters.length === 0) {
     ctx.err('错误：没有选定任何工具。');
@@ -214,7 +245,7 @@ export async function initCommand(ctx: CliContext, repo: string | undefined, opt
     return 1;
   }
 
-  const { primaryRole, additionalRoles } = await pickRoles(ctx, snapshot, options.role);
+  const { primaryRole, additionalRoles } = await pickRoles(ctx, snapshot, options.role, ask);
 
   const config: Config = {
     version: 1,

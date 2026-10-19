@@ -6,6 +6,7 @@ import { teamGitattributes, teamReadme } from './team-readme.js';
 import { commitAll, createBranch, isDirty, listRemoteBranches, prePushScan, push, removePaths, writeFiles } from '../git/repo.js';
 import { makeGitProvider } from '../git/provider.js';
 import { newMrWebUrl, parseRepoRef } from '../git/gitlab.js';
+import { hasGitAvailable } from '../platform.js';
 import type { CliContext } from './context.js';
 import { acquireLock, lockPath, STALE_MS } from './lock.js';
 import type { Snapshot } from './snapshot.js';
@@ -28,6 +29,14 @@ export interface MrOutcome {
   mrUrl: string | null;
 }
 
+export interface SubmitMrChangeOptions {
+  /**
+   * 本机是否有可用 git。注入点（同 snapshot 的可选参数风格）：
+   * 测试伪装「没装 git」用；缺省真探测 hasGitAvailable(env)。
+   */
+  gitAvailable?: boolean;
+}
+
 /** UTC 时间戳：20261011T053000Z（定宽，可字典序比较出最新分支） */
 export function stamp(date = new Date()): string {
   return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
@@ -44,7 +53,9 @@ export async function submitMrChange(
   config: Config,
   snapshot: Snapshot,
   change: MrChange,
+  options: SubmitMrChangeOptions = {},
 ): Promise<MrOutcome> {
+  const gitAvailable = options.gitAvailable ?? hasGitAvailable(ctx.env);
   // 与 pull 共用同一把锁：否则会话启动的自动 pull 会把 fetchReset 插进
   // writeFiles 与 commitAll 之间，工作树被就地重置，push 表现为"空提交、没有 MR"。
   const lock = acquireLock(ctx.env);
@@ -57,7 +68,7 @@ export async function submitMrChange(
     return { code: 1, branch: null, mrUrl: null };
   }
   try {
-    return await submitMrChangeInner(ctx, config, snapshot, change);
+    return await submitMrChangeInner(ctx, config, snapshot, change, gitAvailable);
   } finally {
     lock.release();
   }
@@ -68,7 +79,10 @@ async function submitMrChangeInner(
   config: Config,
   snapshot: Snapshot,
   change: MrChange,
+  gitAvailable: boolean,
 ): Promise<MrOutcome> {
+  // 本机没有 git：provider 支持免 git 推送就走纯 API（不碰本地 checkout），否则给可行动错误。
+  if (!gitAvailable) return submitMrChangeWithoutGit(ctx, config, change, snapshot);
   const dir = snapshot.dir;
   const targetBranch = snapshot.branch;
 
@@ -101,6 +115,103 @@ async function submitMrChangeInner(
   }
 }
 
+/**
+ * 免 git 推送：本机没有 git 时，provider 实现了 apiPush 就走纯 OpenAPI
+ * （复用或新建分支 → 写文件 → 删文件 → 开 MR），文件来源与 git 路径同一个 MrChange
+ * （仓库根相对路径 → 内容）；没实现 apiPush 则给可行动错误并返回非 0。
+ *
+ * 该路径不触碰本地 checkout 与 ledger（免 git 机器上本来也没有 checkout），
+ * 但敏感内容扫描必须照走 —— git 路径在 commit 前有 prePushScan，这里不能绕过。
+ * 空仓库（snapshot.head === ''，与 git 路径 remote.length === 0 同判据）走 bootstrap：
+ * README/.gitattributes 与 git 路径同一份补齐逻辑，直推默认分支、不开 MR。
+ */
+async function submitMrChangeWithoutGit(
+  ctx: CliContext,
+  config: Config,
+  change: MrChange,
+  snapshot: Snapshot,
+): Promise<MrOutcome> {
+  const provider = makeGitProvider(config, ctx.env);
+  if (!provider.apiPush) {
+    ctx.err(`错误：本机没有可用的 git，当前托管（provider=${config.provider}）也不支持免 git 推送。`);
+    ctx.err('下一步：安装 Git for Windows（https://git-scm.com/download/win）后重跑；或把待推文件交给管理员代推。');
+    return { code: 1, branch: null, mrUrl: null };
+  }
+
+  const findings = prePushScan(change.files);
+  if (findings.length > 0) {
+    for (const finding of findings) ctx.err(`安全检查：${finding}`);
+    ctx.err('下一步：移除敏感内容后重新运行该命令');
+    return { code: 1, branch: null, mrUrl: null };
+  }
+
+  const targetBranch = snapshot.branch?.trim() || 'main';
+  // 空仓库判据与 git 路径一致（fetchReset 对无提交远端返回 head=''）：首笔引导直推默认分支
+  const bootstrap = snapshot.head === '';
+  const files = withBootstrapExtras(config, change.files, snapshot.dir, targetBranch, bootstrap);
+  ctx.out(
+    bootstrap
+      ? `本机没有 git，改走 ${config.provider} OpenAPI 免 git 推送（空仓库引导 → 直推 ${targetBranch}）`
+      : `本机没有 git，改走 ${config.provider} OpenAPI 免 git 推送（分支 ${change.branchPrefix}* → ${targetBranch}）`,
+  );
+  try {
+    const mr = await provider.apiPush({
+      branchPrefix: change.branchPrefix,
+      targetBranch,
+      title: change.title,
+      body: change.body,
+      files,
+      removedPaths: change.removes,
+      bootstrap,
+    });
+    const branch = mr.branch ?? `${change.branchPrefix}?`;
+    if (mr.bootstrapped === true) {
+      if (mr.instructions) ctx.out(mr.instructions);
+      ctx.out(`团队仓库首个提交已直接落到 ${branch}：空仓库没有可评审的基线，之后的变更继续走 MR`);
+      return { code: 0, branch, mrUrl: null };
+    }
+    if (mr.url) {
+      if (mr.instructions) ctx.out(mr.instructions);
+      ctx.out(`MR 已创建：${mr.url}`);
+      ctx.out('下一步：请评审人合入；其他成员下次会话自动拿到变更');
+      return { code: 0, branch, mrUrl: mr.url };
+    }
+    if (mr.instructions) ctx.out(mr.instructions);
+    // 免 git 路径没有「分支已推送成功」这个可靠锚点（instructions 也可能意味着一步都没推成），
+    // 与 git 路径的 openMr 失败（code 0）不同，这里按失败计，让调用方看输出后重试
+    return { code: 1, branch, mrUrl: null };
+  } catch (e) {
+    ctx.err(`错误：免 git 推送失败：${e instanceof Error ? e.message : String(e)}`);
+    ctx.err('下一步：装好 git 后重跑（会改走本地 git push），或到仓库网页从对应分支手动处理');
+    return { code: 1, branch: null, mrUrl: null };
+  }
+}
+
+/**
+ * 空仓库首笔提交的补齐（README 说明书 + .gitattributes 行尾钉 LF），git 与免 git
+ * 两条路径共用同一份逻辑——分支不同、补齐内容必须逐字相同，否则两条链路建出的
+ * 团队仓基线不一致。
+ */
+function withBootstrapExtras(
+  config: Config,
+  files: Record<string, string>,
+  dir: string,
+  targetBranch: string,
+  bootstrap: boolean,
+): Record<string, string> {
+  if (!bootstrap) return files;
+  const merged: Record<string, string> = { ...files };
+  if (!('README.md' in merged) && !existsSync(join(dir, 'README.md'))) {
+    // 新同事打开仓库就该看得见怎么加入，而不是靠有人在群里再贴一遍命令。
+    merged['README.md'] = teamReadme(config.repo, targetBranch);
+  }
+  if (!('.gitattributes' in merged) && !existsSync(join(dir, '.gitattributes'))) {
+    // 第一笔提交就把行尾钉成 LF，别让第一个 Windows 成员把 CRLF 提交进团队真相。
+    merged['.gitattributes'] = teamGitattributes();
+  }
+  return merged;
+}
+
 async function finishMrChange(
   ctx: CliContext,
   config: Config,
@@ -111,16 +222,10 @@ async function finishMrChange(
   const { branch, targetBranch, bootstrap } = state;
   const dir = snapshot.dir;
 
-  const written = Object.entries(change.files);
-  if (bootstrap && !('README.md' in change.files) && !existsSync(join(dir, 'README.md'))) {
-    // 空仓库的第一笔提交顺手把首页说明书放进去：新同事打开仓库就该看得见怎么加入，
-    // 而不是靠有人在群里再贴一遍命令。
-    written.push(['README.md', teamReadme(config.repo, targetBranch)]);
-  }
-  if (bootstrap && !('.gitattributes' in change.files) && !existsSync(join(dir, '.gitattributes'))) {
-    // 同上：第一笔提交就把行尾钉成 LF，别让第一个 Windows 成员把 CRLF 提交进团队真相。
-    written.push(['.gitattributes', teamGitattributes()]);
-  }
+  // 空仓库首笔的 README/.gitattributes 补齐与免 git 路径共用 withBootstrapExtras
+  // （两条链路建出的团队仓基线必须逐字一致）
+  const files = withBootstrapExtras(config, change.files, dir, targetBranch, bootstrap);
+  const written = Object.entries(files);
   if (written.length > 0) {
     writeFiles(dir, Object.fromEntries(written.map(([rel, content]) => [`./${rel}`, content])));
   }
