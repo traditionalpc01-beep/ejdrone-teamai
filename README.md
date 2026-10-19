@@ -34,6 +34,11 @@ Windows 成员（产品、运营等，机器上没有 Node 与 git）一条命�
 powershell -c "irm <托管地址>/ejdrone-setup.ps1 | iex"
 ```
 
+已经在用 AI 编程工具（ZCode / Claude Code / Qoder / Cursor 等）的成员还有第三条路：
+把 `scripts/install/ai-agent-setup.md` 那份安装委托书整体粘给 AI，附一句自己的角色职责，
+由 AI 驱动同样的脚本完成安装、对照角色清单确认订阅、跑 `ejdrone doctor` 验收。
+准备与分发见 `docs/deploy/ai-agent-install.md`。
+
 ### 手动安装（开发角色）
 
 前置：Node.js ≥ 20 与 git；Windows 另需 [Git for Windows](https://git-scm.com/download/win)。

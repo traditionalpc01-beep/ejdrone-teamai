@@ -3,6 +3,14 @@
 适用对象：产品经理、运营、设计等不装开发环境的成员，目标是把成员侧安装压到一条命令，
 中间最多按提示选一次工具和角色。开发者成员继续走仓库 README 的手动安装通道，不适用本文。
 
+**三个分发通道怎么选**：
+
+| 通道 | 成员动作 | 适合 |
+|---|---|---|
+| 脚本直跑（本文） | 下载 `.cmd` 双击，或右键 `.ps1` 运行 | 不依赖任何托管与 AI 工具，最稳 |
+| 一句话安装（本文 §4/§5） | PowerShell 粘一条 `irm … \| iex` | 脚本有内网托管地址时 |
+| AI 委托（`ai-agent-install.md`） | 把委托书粘给自己在用的 AI 工具 | 成员已有能执行命令的 AI 工具——顺手、跨平台、出错 AI 自处置 |
+
 实现方式：`scripts/install/ejdrone-setup.ps1` 把便携 Node 解压到 `~/.ejdrone/runtime`、
 把 CLI 装进 `~/.ejdrone/npm-global`（走独立 npmrc，不碰系统 Node 与 `~/.npmrc`），按需写入
 用户级 `EJDRONE_CODEUP_TOKEN`，最后执行 `ejdrone init` 并在桌面放一个「ejdrone 同步.cmd」。
