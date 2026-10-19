@@ -22,31 +22,50 @@
 
 ## 安装
 
-### 一键安装（推荐给非开发角色）
+**团队仓库已经建好，所有安装方式最终连的都是它——成员不需要、也不应该自己创建仓库
+或换别的地址执行 init：**
 
-Windows 成员（产品、运营等，机器上没有 Node 与 git）一条命令完成：便携 Node 装进
-`~/.ejdrone/runtime`、CLI 装进 `~/.ejdrone/npm-global`（独立 npmrc，不碰系统 Node 与
-`~/.npmrc`），随后自动执行 `ejdrone init` 并在桌面放一个手动同步入口。托管地址与角色等
-参数由管理员预先烤进脚本，准备与分发见 `docs/deploy/member-zero-install.md`：
+```
+https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-teamai.git
+```
+
+任何步骤要求填「团队仓库地址」时，原样填上面这一个。记不住就去团队群找管理员的话术，
+或打开团队仓库网页复制地址栏。
+
+按你的情况选一条：
+
+### 方式一：交给你的 AI 工具（在用 ZCode / Claude Code / Qoder / Cursor 等的成员，最省事）
+
+把 `scripts/install/ai-agent-setup.md` 安装委托书整体复制给你的 AI，附一句角色职责
+（如「我是产品经理」）。AI 会驱动安装脚本完成全部步骤、对照角色清单跟你确认订阅、
+跑 `ejdrone doctor` 验收。管理员准备与分发见 `docs/deploy/ai-agent-install.md`。
+
+### 方式二：一键脚本（Windows，机器上没有 Node 与 git 也没关系）
+
+管理员已托管脚本时，打开「开始菜单 → Windows PowerShell」粘贴一行（地址以管理员发布为准）：
 
 ```powershell
-# 地址以管理员发布为准
 powershell -c "irm <托管地址>/ejdrone-setup.ps1 | iex"
 ```
 
-已经在用 AI 编程工具（ZCode / Claude Code / Qoder / Cursor 等）的成员还有第三条路：
-把 `scripts/install/ai-agent-setup.md` 那份安装委托书整体粘给 AI，附一句自己的角色职责，
-由 AI 驱动同样的脚本完成安装、对照角色清单确认订阅、跑 `ejdrone doctor` 验收。
-准备与分发见 `docs/deploy/ai-agent-install.md`。
+没有托管地址时的离线等价：下载 `ejdrone-setup.ps1` 与 `ejdrone-setup.cmd` 放同一目录，
+双击 `.cmd`（或右键 `.ps1` 选「使用 PowerShell 运行」）。脚本装了什么（便携 Node 进
+`~/.ejdrone/runtime` 不碰系统、CLI 进独立 npm-global、桌面放「ejdrone 同步」入口）
+以及管理员如何准备，见 `docs/deploy/member-zero-install.md`。
 
-### 手动安装（开发角色）
-
-前置：Node.js ≥ 20 与 git；Windows 另需 [Git for Windows](https://git-scm.com/download/win)。
+### 方式三：手动安装（开发角色，本机已有 Node ≥ 20 与 git）
 
 ```bash
 # 从 Codeup 源码仓直装：复用你克隆团队仓库的同一份 git 凭据，无需配置 npm 源
 npm install -g "git+https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-teamai-cli.git#v2.1.2"
 ejdrone --version                # 打印版本号即安装成功
+```
+
+加入团队（**地址就是本节开头那个，不要改**）：
+
+```bash
+ejdrone init https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-teamai.git
+# 交互里勾选在用的工具、选自己的角色（选项带中文说明，不确定就先跳过）
 ```
 
 升级 = 换新 tag 重装同一条命令（`#v2.1.3` …）。
@@ -60,12 +79,16 @@ Windows 的会话自动 pull 依赖 Git for Windows 的 bash；没装时 hook �
 
 ## 快速上手
 
-### 1. 管理员：建团队仓库
+> 本团队的仓库**已经建好并初始化完毕**（地址见「安装」一节开头），成员从这里第 2 节
+> 开始看即可。第 1 节只给管理员在未来新建团队或迁仓时参考，里面用的是示例地址，
+> **不要照抄执行**。
 
-在 Git 托管上建一个空仓库（如 `ejdrone-team`），给全员 write 权限：
+### 1.（仅管理员）建团队仓库
+
+在新团队上建一个空仓库，给全员 write 权限：
 
 ```bash
-ejdrone init https://gitlab.example.com/team/ejdrone-team.git
+ejdrone init <你的团队仓库地址>
 ejdrone doctor          # 逐项体检，全绿才算就绪
 ```
 
@@ -79,14 +102,16 @@ ejdrone roles add devops --namespaces devops -d "运维/流程"
 
 ### 2. 成员：加入（3 分钟）
 
+装好 CLI（见「安装」）后执行——**仓库地址原样用下面这个，不要自己建仓库、不要换地址**：
+
 ```bash
-ejdrone init https://gitlab.example.com/team/ejdrone-team.git
-# 交互里勾选在用的工具、选自己的角色
+ejdrone init https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-teamai.git
+# 交互里勾选在用的工具、选自己的角色（选项带中文说明，不确定就先跳过，之后随时能改）
 ejdrone list            # 看拿到了什么
 ```
 
 之后日常零操作：会话启动时 hook 自动 `pull`。脚本 / CI 可跳过交互：
-`ejdrone init <repo> --agent qoder-cn,claude --role devops --force`。
+`ejdrone init https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-teamai.git --agent qoder-cn,claude --role devops --force`。
 
 ### 3. 日常：分享与沉淀
 
