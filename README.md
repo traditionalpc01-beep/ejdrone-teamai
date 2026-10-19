@@ -26,11 +26,11 @@
 
 ```bash
 # 从 Codeup 源码仓直装：复用你克隆团队仓库的同一份 git 凭据，无需配置 npm 源
-npm install -g "git+https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-skills.git#v2.1.1"
+npm install -g "git+https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-teamai-cli.git#v2.1.2"
 ejdrone --version                # 打印版本号即安装成功
 ```
 
-升级 = 换新 tag 重装同一条命令（`#v2.1.2` …）。
+升级 = 换新 tag 重装同一条命令（`#v2.1.3` …）。
 备用通道（CI / 无法走 git 时）：云效制品库 npm 源
 `npm config set registry https://packages.aliyun.com/64084f5656067d3aad3e0d11/npm/npm-registry/`
 后 `npm install -g ejdrone-teamai`；首次使用需在制品库页面取个人 npm 凭据写进 `~/.npmrc`。

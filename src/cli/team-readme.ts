@@ -67,7 +67,7 @@ export function teamReadme(repo: string, branch: string): string {
 ## 成员：怎么加入
 
 \`\`\`bash
-npm install -g "git+https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-skills.git#v2.1.1"
+npm install -g "git+https://codeup.aliyun.com/ejdrone/1C5P/ejdrone-teamai-cli.git#v2.1.2"
 ejdrone init ${repo}
 ejdrone doctor                       # 逐项体检，全绿即完成
 \`\`\`
